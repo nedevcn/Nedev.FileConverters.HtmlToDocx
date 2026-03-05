@@ -1,19 +1,23 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
+using System.IO;
+using System.Text;
 using Nedev.HtmlToDocx.Core.Docx;
 using Nedev.HtmlToDocx.Core.Html;
+using Nedev.HtmlToDocx.Core.Css;
+using Nedev.HtmlToDocx.Core.Models;
 
 namespace Nedev.HtmlToDocx.Core.Conversion;
-
-public class ConverterOptions
-{
-    public bool PreserveStyles { get; set; } = true;
-    public bool DownloadImages { get; set; } = true;
-    public int MaxImageSize { get; set; } = 5 * 1024 * 1024;
-    public TimeSpan ImageDownloadTimeout { get; set; } = TimeSpan.FromSeconds(30);
-}
 
 public class HtmlToDocxConverter : IDisposable
 {
     private readonly ConverterOptions _options;
+    private readonly Stack<(int NumId, int Level)> _listStack = new();
+    private readonly HttpClient _httpClient = new();
 
     public HtmlToDocxConverter(ConverterOptions? options = null)
     {
@@ -23,9 +27,18 @@ public class HtmlToDocxConverter : IDisposable
     public byte[] Convert(string html)
     {
         var document = HtmlDocument.Parse(html);
+        if (_options.PreserveStyles)
+        {
+            StyleResolver.ResolveStyles(document);
+        }
+
         var builder = new DocumentBuilder();
         ConvertNode(document.Root, builder);
-        return BuildDocx(builder.Build());
+        return BuildDocx(builder.Build(_options), 
+                        builder.BuildRelationships(), 
+                        builder.BuildMedia(),
+                        builder.BuildStyles(),
+                        builder.BuildFonts());
     }
 
     public async Task<byte[]> ConvertAsync(string html, CancellationToken cancellationToken = default)
@@ -35,53 +48,177 @@ public class HtmlToDocxConverter : IDisposable
 
     private void ConvertNode(HtmlNode node, DocumentBuilder builder)
     {
-        foreach (var child in node.Children)
+        switch (node.TagName.ToLowerInvariant())
         {
-            switch (child.TagName.ToLowerInvariant())
-            {
-                case "h1":
-                case "h2":
-                case "h3":
-                case "h4":
-                case "h5":
-                case "h6":
-                    var level = int.Parse(child.TagName.Substring(1));
-                    builder.AddHeading(ExtractText(child), level);
-                    break;
-                case "p":
-                    builder.AddParagraph(ExtractText(child));
-                    break;
-                case "table":
-                    ConvertTable(child, builder);
-                    break;
-                case "div":
-                case "section":
-                case "article":
-                    ConvertNode(child, builder);
-                    break;
-                case "#text":
-                    if (!string.IsNullOrWhiteSpace(child.Text))
-                        builder.AddParagraph(child.Text);
-                    break;
-            }
+            case "h1":
+            case "h2":
+            case "h3":
+            case "h4":
+            case "h5":
+            case "h6":
+                var level = int.TryParse(node.TagName.Substring(1), out var l) ? l : 1;
+                builder.StartParagraph($"Heading{level}", GetTextAlign(node));
+                foreach (var child in node.Children) ConvertNode(child, builder);
+                builder.EndParagraph();
+                return;
+            case "p":
+                builder.StartParagraph(textAlign: GetTextAlign(node));
+                foreach (var child in node.Children) ConvertNode(child, builder);
+                builder.EndParagraph();
+                return;
+            case "table":
+                ConvertTable(node, builder);
+                return;
+            case "ul":
+                _listStack.Push((1, _listStack.Count)); // 1 for Bullet
+                foreach (var child in node.Children) ConvertNode(child, builder);
+                _listStack.Pop();
+                return;
+            case "ol":
+                _listStack.Push((2, _listStack.Count)); // 2 for Numbered
+                foreach (var child in node.Children) ConvertNode(child, builder);
+                _listStack.Pop();
+                return;
+            case "li":
+                if (_listStack.TryPeek(out var listInfo))
+                {
+                    builder.StartParagraph(listNumId: listInfo.NumId, listLevel: listInfo.Level);
+                    foreach (var child in node.Children) ConvertNode(child, builder);
+                    builder.EndParagraph();
+                }
+                else
+                {
+                    // Fallback if li is outside ul/ol
+                    builder.StartParagraph();
+                    foreach (var child in node.Children) ConvertNode(child, builder);
+                    builder.EndParagraph();
+                }
+                return;
+            case "br":
+                builder.AddRun("\r"); // Simpler for now, or builder.AddBreak()
+                return;
+            case "#text":
+                builder.AddRun(node.Text, GetRunProperties(node));
+                return;
+            case "div":
+            case "section":
+            case "article":
+            case "body":
+            case "html":
+            case "#document":
+                // Container tags, just process children
+                foreach (var child in node.Children) ConvertNode(child, builder);
+                return;
+            case "b":
+            case "strong":
+            case "i":
+            case "em":
+            case "u":
+            case "span":
+            case "font":
+                // Inline tags, process children (runs will inherit styles via StyleResolver)
+                foreach (var child in node.Children) ConvertNode(child, builder);
+                return;
+            case "a":
+                var href = node.GetAttribute("href") ?? "#";
+                builder.AddHyperlink(ExtractText(node), href);
+                return;
+            case "img":
+                var src = node.GetAttribute("src");
+                if (!string.IsNullOrEmpty(src))
+                {
+                    var imageData = ProcessImage(src).GetAwaiter().GetResult();
+                    if (imageData != null)
+                    {
+                        builder.AddImage(imageData.Data, imageData.ContentType, imageData.Width, imageData.Height);
+                    }
+                }
+                return;
+            case "style":
+            case "script":
+            case "head":
+                // Ignore these in the final document body
+                return;
+            default:
+                // Fallback for unknown tags
+                foreach (var child in node.Children) ConvertNode(child, builder);
+                return;
         }
     }
 
     private void ConvertTable(HtmlNode node, DocumentBuilder builder)
     {
-        var table = new TableData();
-        foreach (var rowNode in node.Children.Where(c => c.TagName == "tr"))
+        var trNodes = node.Children.Where(c => c.TagName == "tr").ToList();
+        if (!trNodes.Any()) trNodes = node.Children.SelectMany(c => c.Children).Where(c => c.TagName == "tr").ToList();
+        if (!trNodes.Any()) return;
+
+        int rowCount = trNodes.Count;
+        // Accurate column count estimation is hard, use a safe buffer
+        int initialColEstimate = trNodes.Max(tr => tr.Children.Count(c => c.TagName == "td" || c.TagName == "th")) * 2;
+        var grid = new TableCell?[rowCount, initialColEstimate + 10];
+        int maxCols = 0;
+
+        for (int r = 0; r < rowCount; r++)
+        {
+            var tr = trNodes[r];
+            var htmlCells = tr.Children.Where(c => c.TagName == "td" || c.TagName == "th").ToList();
+            int cPos = 0;
+
+            foreach (var cellNode in htmlCells)
+            {
+                // Find next free spot in the grid for this row
+                while (cPos < grid.GetLength(1) && grid[r, cPos] != null) cPos++;
+                if (cPos >= grid.GetLength(1)) break;
+
+                int colspan = int.TryParse(cellNode.GetAttribute("colspan"), out var cs) ? cs : 1;
+                int rowspan = int.TryParse(cellNode.GetAttribute("rowspan"), out var rs) ? rs : 1;
+
+                var cell = new TableCell { 
+                    Text = ExtractText(cellNode), 
+                    ColSpan = colspan,
+                    RowMerge = rowspan > 1 ? RowMergeType.Restart : RowMergeType.None
+                };
+
+                grid[r, cPos] = cell;
+                maxCols = Math.Max(maxCols, cPos + colspan);
+
+                // Mark grid occupancy for rowspan and colspan
+                for (int i = 0; i < rowspan; i++)
+                {
+                    for (int j = 0; j < colspan; j++)
+                    {
+                        if (r + i < rowCount && cPos + j < grid.GetLength(1))
+                        {
+                            if (i == 0 && j == 0) continue; // Already set the primary cell
+                            grid[r + i, cPos + j] = new TableCell { RowMerge = i > 0 ? RowMergeType.Continue : RowMergeType.None };
+                        }
+                    }
+                }
+                cPos += colspan;
+            }
+        }
+
+        var tableData = new TableData();
+        for (int r = 0; r < rowCount; r++)
         {
             var row = new TableRow();
-            foreach (var cellNode in rowNode.Children.Where(c => c.TagName == "td" || c.TagName == "th"))
+            for (int c = 0; c < maxCols; c++)
             {
-                row.Cells.Add(new TableCell { Text = ExtractText(cellNode) });
+                var cell = grid[r, c];
+                if (cell != null)
+                {
+                    row.Cells.Add(cell);
+                    if (cell.ColSpan > 1) c += (cell.ColSpan - 1);
+                }
+                else
+                {
+                    // Fill gaps with empty cells to keep table consistent
+                    row.Cells.Add(new TableCell());
+                }
             }
-            if (row.Cells.Count > 0)
-                table.Rows.Add(row);
+            tableData.Rows.Add(row);
         }
-        if (table.Rows.Count > 0)
-            builder.AddTable(table);
+        builder.AddTable(tableData);
     }
 
     private static string ExtractText(HtmlNode node)
@@ -92,15 +229,151 @@ public class HtmlToDocxConverter : IDisposable
         var sb = new System.Text.StringBuilder();
         foreach (var child in node.Children)
         {
-            if (child.TagName == "#text")
-                sb.Append(child.Text);
-            else
-                sb.Append(ExtractText(child));
+            sb.Append(ExtractText(child));
         }
-        return sb.ToString().Trim();
+        return sb.ToString();
     }
 
-    private static byte[] BuildDocx(string documentXml)
+    private static RunProperties GetRunProperties(HtmlNode node)
+    {
+        var props = new RunProperties();
+        var style = node.ComputedStyle;
+
+        if (style.TryGetValue("font-weight", out var weight))
+            props.Bold = weight.Equals("bold", StringComparison.OrdinalIgnoreCase) || 
+                         (int.TryParse(weight, out var w) && w >= 700);
+        
+        if (style.TryGetValue("font-style", out var fstyle))
+            props.Italic = fstyle.Equals("italic", StringComparison.OrdinalIgnoreCase);
+
+        if (style.TryGetValue("text-decoration", out var decor))
+            props.Underline = decor.Contains("underline", StringComparison.OrdinalIgnoreCase);
+
+        if (style.TryGetValue("color", out var color))
+            props.Color = ParseColor(color);
+
+        if (style.TryGetValue("font-size", out var size))
+            props.FontSize = ParseFontSize(size);
+
+        if (style.TryGetValue("font-family", out var family))
+            props.FontFamily = family.Split(',')[0].Trim('\'', '\"', ' ');
+
+        // Manual tag check for fallback if StyleResolver is disabled or for specific tags
+        var current = node;
+        while (current != null)
+        {
+            if (current.TagName == "b" || current.TagName == "strong") props.Bold = true;
+            if (current.TagName == "i" || current.TagName == "em") props.Italic = true;
+            if (current.TagName == "u") props.Underline = true;
+            current = current.Parent;
+        }
+
+        return props;
+    }
+
+    private static string? GetTextAlign(HtmlNode node)
+    {
+        if (node.ComputedStyle.TryGetValue("text-align", out var align))
+        {
+            return align switch
+            {
+                "center" => "center",
+                "right" => "right",
+                "justify" => "both",
+                _ => "left"
+            };
+        }
+        return null;
+    }
+
+    private static int ParseFontSize(string size)
+    {
+        // Simple parser for px and pt
+        try {
+            if (size.EndsWith("pt")) return (int)double.Parse(size.Substring(0, size.Length - 2));
+            if (size.EndsWith("px")) return (int)(double.Parse(size.Substring(0, size.Length - 2)) * 0.75);
+            if (double.TryParse(size, out var val)) return (int)val;
+        } catch {}
+        return 0;
+    }
+
+    private static string? ParseColor(string color)
+    {
+        if (color.StartsWith("#")) return color;
+        // Basic named colors mapping can be added here
+        return color; 
+    }
+
+    private async Task<ImageData?> ProcessImage(string src)
+    {
+        try {
+            byte[] data;
+            string contentType = "image/png";
+
+            if (src.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+            {
+                var parts = src.Split(',');
+                if (parts.Length < 2) return null;
+                data = System.Convert.FromBase64String(parts[1]);
+                var header = parts[0];
+                if (header.Contains("image/jpeg")) contentType = "image/jpeg";
+                else if (header.Contains("image/gif")) contentType = "image/gif";
+            }
+            else if (_options.DownloadImages && (src.StartsWith("http") || src.StartsWith("https")))
+            {
+                using var cts = new CancellationTokenSource(_options.ImageDownloadTimeout);
+                var response = await _httpClient.GetAsync(src, cts.Token);
+                if (!response.IsSuccessStatusCode) return null;
+                data = await response.Content.ReadAsByteArrayAsync();
+                contentType = response.Content.Headers.ContentType?.MediaType ?? "image/png";
+            }
+            else if (File.Exists(src))
+            {
+                data = await File.ReadAllBytesAsync(src);
+                var ext = Path.GetExtension(src).ToLowerInvariant();
+                contentType = ext switch {
+                    ".jpg" or ".jpeg" => "image/jpeg",
+                    ".gif" => "image/gif",
+                    _ => "image/png"
+                };
+            }
+            else return null;
+
+            if (data.Length > _options.MaxImageSize) return null;
+
+            // Simple size detection or use defaults
+            return new ImageData { Data = data, ContentType = contentType, Width = 300, Height = 200 };
+        } catch { return null; }
+    }
+
+    private class ImageData
+    {
+        public byte[] Data { get; set; } = Array.Empty<byte>();
+        public string ContentType { get; set; } = string.Empty;
+        public int Width { get; set; }
+        public int Height { get; set; }
+    }
+
+    private static string GetNumberingXml()
+    {
+        return "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
+               "<w:numbering xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">" +
+               "<w:abstractNum w:abstractNumId=\"0\">" +
+               "<w:multiLevelType w:val=\"hybridMultilevel\"/>" +
+               "<w:lvl w:ilvl=\"0\"><w:start w:val=\"1\"/><w:numFmt w:val=\"bullet\"/><w:lvlText w:val=\"\"/><w:lvlJc w:val=\"left\"/><w:pPr><w:ind w:left=\"720\" w:hanging=\"360\"/></w:pPr><w:rPr><w:rFonts w:ascii=\"Symbol\" w:hAnsi=\"Symbol\" w:hint=\"default\"/></w:rPr></w:lvl>" +
+               "<w:lvl w:ilvl=\"1\"><w:start w:val=\"1\"/><w:numFmt w:val=\"bullet\"/><w:lvlText w:val=\"o\"/><w:lvlJc w:val=\"left\"/><w:pPr><w:ind w:left=\"1440\" w:hanging=\"360\"/></w:pPr><w:rPr><w:rFonts w:ascii=\"Courier New\" w:hAnsi=\"Courier New\" w:hint=\"default\"/></w:rPr></w:lvl>" +
+               "</w:abstractNum>" +
+               "<w:abstractNum w:abstractNumId=\"1\">" +
+               "<w:multiLevelType w:val=\"hybridMultilevel\"/>" +
+               "<w:lvl w:ilvl=\"0\"><w:start w:val=\"1\"/><w:numFmt w:val=\"decimal\"/><w:lvlText w:val=\"%1.\"/><w:lvlJc w:val=\"left\"/><w:pPr><w:ind w:left=\"720\" w:hanging=\"360\"/></w:pPr></w:lvl>" +
+               "<w:lvl w:ilvl=\"1\"><w:start w:val=\"1\"/><w:numFmt w:val=\"decimal\"/><w:lvlText w:val=\"%1.%2.\"/><w:lvlJc w:val=\"left\"/><w:pPr><w:ind w:left=\"1440\" w:hanging=\"360\"/></w:pPr></w:lvl>" +
+               "</w:abstractNum>" +
+               "<w:num w:numId=\"1\"><w:abstractNumId w:val=\"0\"/></w:num>" +
+               "<w:num w:numId=\"2\"><w:abstractNumId w:val=\"1\"/></w:num>" +
+               "</w:numbering>";
+    }
+
+    private static byte[] BuildDocx(string documentXml, string? relationsXml = null, List<(string Name, byte[] Data)>? media = null, string? stylesXml = null, string? fontsXml = null)
     {
         using var zip = new ZipArchiveHelper();
         
@@ -110,7 +383,13 @@ public class HtmlToDocxConverter : IDisposable
             "<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">" +
             "<Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>" +
             "<Default Extension=\"xml\" ContentType=\"application/xml\"/>" +
+            "<Default Extension=\"jpg\" ContentType=\"image/jpeg\"/>" +
+            "<Default Extension=\"png\" ContentType=\"image/png\"/>" +
+            "<Default Extension=\"gif\" ContentType=\"image/gif\"/>" +
             "<Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/>" +
+            "<Override PartName=\"/word/numbering.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml\"/>" +
+            "<Override PartName=\"/word/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml\"/>" +
+            "<Override PartName=\"/word/fontTable.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.fontTable+xml\"/>" +
             "</Types>");
         
         // _rels/.rels
@@ -121,18 +400,53 @@ public class HtmlToDocxConverter : IDisposable
             "</Relationships>");
         
         // word/_rels/document.xml.rels
-        zip.AddEntry("word/_rels/document.xml.rels",
-            "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
-            "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">" +
-            "</Relationships>");
+        var docRels = new StringBuilder();
+        docRels.Append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>");
+        docRels.Append("<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">");
+        docRels.Append("<Relationship Id=\"rIdNumbering\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering\" Target=\"numbering.xml\"/>");
+        docRels.Append("<Relationship Id=\"rIdStyles\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/>");
+        docRels.Append("<Relationship Id=\"rIdFonts\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable\" Target=\"fontTable.xml\"/>");
         
+        if (!string.IsNullOrEmpty(relationsXml))
+        {
+            // Extract intermediate relationships and append
+            var tempRels = relationsXml.Replace("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>", "")
+                                     .Replace("<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">", "")
+                                     .Replace("</Relationships>", "");
+            docRels.Append(tempRels);
+        }
+        docRels.Append("</Relationships>");
+
+        zip.AddEntry("word/_rels/document.xml.rels", docRels.ToString());
+
         // word/document.xml
         zip.AddEntry("word/document.xml", documentXml);
+
+        // word/numbering.xml
+        zip.AddEntry("word/numbering.xml", GetNumberingXml());
+
+        // word/styles.xml
+        if (!string.IsNullOrEmpty(stylesXml))
+            zip.AddEntry("word/styles.xml", stylesXml);
+
+        // word/fontTable.xml
+        if (!string.IsNullOrEmpty(fontsXml))
+            zip.AddEntry("word/fontTable.xml", fontsXml);
+
+        // word/media/
+        if (media != null)
+        {
+            foreach (var m in media)
+            {
+                zip.AddEntry($"word/media/{m.Name}", m.Data);
+            }
+        }
         
         return zip.ToArray();
     }
 
     public void Dispose()
     {
+        _httpClient.Dispose();
     }
 }

@@ -35,5 +35,7 @@ public readonly struct HtmlToken
     public static HtmlToken EndTagToken(string tagName) => new(HtmlTokenType.EndTag, tagName: tagName);
     public static HtmlToken SelfClosingTagToken(string tagName, HtmlAttribute[]? attributes = null) => 
         new(HtmlTokenType.SelfClosingTag, tagName: tagName, attributes: attributes, isSelfClosing: true);
+    public static HtmlToken CommentToken(string text) => new(HtmlTokenType.Comment, text: text);
+    public static HtmlToken DoctypeToken(string text) => new(HtmlTokenType.Doctype, text: text);
     public static HtmlToken EofToken() => new(HtmlTokenType.EOF);
 }

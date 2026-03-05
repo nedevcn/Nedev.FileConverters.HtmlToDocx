@@ -1,3 +1,6 @@
+using System.Collections.Generic;
+using Nedev.HtmlToDocx.Core.Css;
+
 namespace Nedev.HtmlToDocx.Core.Html;
 
 public class HtmlNode
@@ -7,6 +10,7 @@ public class HtmlNode
     public List<HtmlNode> Children { get; set; } = new();
     public HtmlNode? Parent { get; set; }
     public Dictionary<string, string> Attributes { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, string> ComputedStyle { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public string? GetAttribute(string name) => Attributes.TryGetValue(name, out var value) ? value : null;
     public string? Id => GetAttribute("id");
 }
@@ -14,6 +18,7 @@ public class HtmlNode
 public class HtmlDocument
 {
     public HtmlNode Root { get; } = new() { TagName = "#document" };
+    public List<CssRule> Stylesheet { get; } = new();
 
     public static HtmlDocument BuildTree(HtmlToken[] tokens)
     {
@@ -28,8 +33,17 @@ public class HtmlDocument
                 case HtmlTokenType.Text:
                     if (!string.IsNullOrWhiteSpace(token.Text))
                     {
-                        var textNode = new HtmlNode { TagName = "#text", Text = token.Text, Parent = stack.Peek() };
-                        stack.Peek().Children.Add(textNode);
+                        var parent = stack.Peek();
+                        // Special handling for style tag content
+                        if (parent.TagName.Equals("style", StringComparison.OrdinalIgnoreCase))
+                        {
+                            document.Stylesheet.AddRange(Css.CssParser.ParseStylesheet(token.Text));
+                        }
+                        else
+                        {
+                            var textNode = new HtmlNode { TagName = "#text", Text = token.Text, Parent = parent };
+                            parent.Children.Add(textNode);
+                        }
                     }
                     break;
                 case HtmlTokenType.StartTag:
@@ -48,6 +62,10 @@ public class HtmlDocument
                     foreach (var attr in token.Attributes)
                         selfClosing.Attributes[attr.Name] = attr.Value;
                     stack.Peek().Children.Add(selfClosing);
+                    break;
+                case HtmlTokenType.Comment:
+                case HtmlTokenType.Doctype:
+                    // For now, we ignore these in the tree
                     break;
             }
         }

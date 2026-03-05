@@ -1,5 +1,6 @@
 using Nedev.HtmlToDocx.Core.Conversion;
 using Nedev.HtmlToDocx.Core.Docx;
+using Nedev.HtmlToDocx.Core.Models;
 
 namespace Nedev.HtmlToDocx;
 
