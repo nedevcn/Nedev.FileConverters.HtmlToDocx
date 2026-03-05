@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Optimize>true</Optimize>
+    <PublishAot>true</PublishAot>
+    
+    <!-- NuGet Package Info -->
+    <PackageId>Nedev.HtmlToDocx</PackageId>
+    <Version>1.0.0</Version>
+    <Authors>Nedev</Authors>
+    <Description>High-performance HTML to DOCX converter for .NET 10 with zero third-party dependencies</Description>
+    <PackageTags>html;docx;converter;word;document;office;openxml</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/nedev/HtmlToDocx</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/nedev/HtmlToDocx</RepositoryUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+</Project>
