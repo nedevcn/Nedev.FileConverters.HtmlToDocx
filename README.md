@@ -15,6 +15,9 @@ High-performance HTML to DOCX converter built on .NET 10 with zero third-party d
 - 🔢 **Nested Lists** - Support for multi-level `<ul>` and `<ol>` with correct numbering indentation.
 - 🖼️ **Multimedia** - Automatic embedding of local, remote (HTTP/S), and Base64 data URI images.
 - 📐 **Page Layout** - Configurable page size (A4, Letter, etc.) and margins.
+- 📄 **Headers & Footers** - HTML `<header>` and `<footer>` mapped to Word header/footer parts.
+- 🔢 **Page Numbering** - Dynamic PAGE / NUMPAGES fields.
+- 📖 **Table of Contents** - Auto-generated TOC field from headings.
 
 ## 📦 Installation
 
@@ -117,10 +120,7 @@ Nedev.HtmlToDocx/
 ## 📝 Roadmap
 
 ### Medium Priority
-- [ ] Page headers and footers
-- [ ] Page numbering
-- [ ] Table of contents generation
-- [ ] SVG to EMF conversion
+- [ ] SVG to EMF conversion support
 
 ### Low Priority
 - [ ] MathML support

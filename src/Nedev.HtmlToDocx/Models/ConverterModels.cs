@@ -10,6 +10,10 @@ public class ConverterOptions
     public int MaxImageSize { get; set; } = 5 * 1024 * 1024;
     public TimeSpan ImageDownloadTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
+    // Advanced Features
+    public bool EnablePageNumbering { get; set; } = true;
+    public int TOCLevels { get; set; } = 3;
+
     // Page Layout (values in twips, 1 inch = 1440)
     public int PageWidth { get; set; } = 11906; // A4
     public int PageHeight { get; set; } = 16838; // A4

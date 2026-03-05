@@ -38,7 +38,9 @@ public class HtmlToDocxConverter : IDisposable
                         builder.BuildRelationships(), 
                         builder.BuildMedia(),
                         builder.BuildStyles(),
-                        builder.BuildFonts());
+                        builder.BuildFonts(),
+                        builder.BuildHeader(),
+                        builder.BuildFooter());
     }
 
     public async Task<byte[]> ConvertAsync(string html, CancellationToken cancellationToken = default)
@@ -100,7 +102,36 @@ public class HtmlToDocxConverter : IDisposable
             case "#text":
                 builder.AddRun(node.Text, GetRunProperties(node));
                 return;
+            case "header":
+                builder.SwitchToHeader();
+                foreach (var child in node.Children) ConvertNode(child, builder);
+                builder.SwitchToBody();
+                return;
+            case "footer":
+                builder.SwitchToFooter();
+                foreach (var child in node.Children) ConvertNode(child, builder);
+                builder.SwitchToBody();
+                return;
             case "div":
+            case "span":
+                var className = node.GetAttribute("class");
+                if (className != null && className.Contains("page-number"))
+                {
+                    builder.AddPageNumberField();
+                    return;
+                }
+                if (className != null && className.Contains("total-pages"))
+                {
+                    builder.AddTotalPagesField();
+                    return;
+                }
+                if (node.TagName == "div" && (node.Id == "toc" || (className != null && className.Contains("toc"))))
+                {
+                    builder.AddTableOfContents(_options.TOCLevels);
+                    return;
+                }
+                foreach (var child in node.Children) ConvertNode(child, builder);
+                return;
             case "section":
             case "article":
             case "body":
@@ -114,7 +145,6 @@ public class HtmlToDocxConverter : IDisposable
             case "i":
             case "em":
             case "u":
-            case "span":
             case "font":
                 // Inline tags, process children (runs will inherit styles via StyleResolver)
                 foreach (var child in node.Children) ConvertNode(child, builder);
@@ -373,7 +403,7 @@ public class HtmlToDocxConverter : IDisposable
                "</w:numbering>";
     }
 
-    private static byte[] BuildDocx(string documentXml, string? relationsXml = null, List<(string Name, byte[] Data)>? media = null, string? stylesXml = null, string? fontsXml = null)
+    private static byte[] BuildDocx(string documentXml, string? relationsXml = null, List<(string Name, byte[] Data)>? media = null, string? stylesXml = null, string? fontsXml = null, string? headerXml = null, string? footerXml = null)
     {
         using var zip = new ZipArchiveHelper();
         
@@ -390,6 +420,8 @@ public class HtmlToDocxConverter : IDisposable
             "<Override PartName=\"/word/numbering.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml\"/>" +
             "<Override PartName=\"/word/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml\"/>" +
             "<Override PartName=\"/word/fontTable.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.fontTable+xml\"/>" +
+            (headerXml != null ? "<Override PartName=\"/word/header1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml\"/>" : "") +
+            (footerXml != null ? "<Override PartName=\"/word/footer1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml\"/>" : "") +
             "</Types>");
         
         // _rels/.rels
@@ -407,6 +439,11 @@ public class HtmlToDocxConverter : IDisposable
         docRels.Append("<Relationship Id=\"rIdStyles\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/>");
         docRels.Append("<Relationship Id=\"rIdFonts\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable\" Target=\"fontTable.xml\"/>");
         
+        if (headerXml != null)
+            docRels.Append("<Relationship Id=\"rIdHeader\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/header\" Target=\"header1.xml\"/>");
+        if (footerXml != null)
+            docRels.Append("<Relationship Id=\"rIdFooter\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer\" Target=\"footer1.xml\"/>");
+
         if (!string.IsNullOrEmpty(relationsXml))
         {
             // Extract intermediate relationships and append
@@ -432,6 +469,12 @@ public class HtmlToDocxConverter : IDisposable
         // word/fontTable.xml
         if (!string.IsNullOrEmpty(fontsXml))
             zip.AddEntry("word/fontTable.xml", fontsXml);
+
+        // word/header1.xml / footer1.xml
+        if (!string.IsNullOrEmpty(headerXml))
+            zip.AddEntry("word/header1.xml", headerXml);
+        if (!string.IsNullOrEmpty(footerXml))
+            zip.AddEntry("word/footer1.xml", footerXml);
 
         // word/media/
         if (media != null)
