@@ -22,21 +22,21 @@ public sealed class HtmlToDocxService : IDisposable
 
     public byte[] Convert(string html)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_disposed) throw new ObjectDisposedException(nameof(HtmlToDocxService));
         _converter ??= new HtmlToDocxConverter(_options);
         return _converter.Convert(html);
     }
 
     public async Task<byte[]> ConvertAsync(string html, CancellationToken cancellationToken = default)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_disposed) throw new ObjectDisposedException(nameof(HtmlToDocxService));
         _converter ??= new HtmlToDocxConverter(_options);
         return await _converter.ConvertAsync(html, cancellationToken);
     }
 
     public void ConvertFile(string inputPath, string outputPath)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_disposed) throw new ObjectDisposedException(nameof(HtmlToDocxService));
         var html = File.ReadAllText(inputPath);
         var docxBytes = Convert(html);
         File.WriteAllBytes(outputPath, docxBytes);
@@ -44,7 +44,7 @@ public sealed class HtmlToDocxService : IDisposable
 
     public async Task ConvertFileAsync(string inputPath, string outputPath, CancellationToken cancellationToken = default)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_disposed) throw new ObjectDisposedException(nameof(HtmlToDocxService));
         var html = await File.ReadAllTextAsync(inputPath, cancellationToken);
         var docxBytes = await ConvertAsync(html, cancellationToken);
         await File.WriteAllBytesAsync(outputPath, docxBytes, cancellationToken);

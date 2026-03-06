@@ -78,4 +78,14 @@ public sealed class CssParser
     }
 }
 
-public sealed record CssRule(string Selector, Dictionary<string, string> Declarations);
+public sealed class CssRule
+{
+    public string Selector { get; }
+    public Dictionary<string, string> Declarations { get; }
+
+    public CssRule(string selector, Dictionary<string, string> declarations)
+    {
+        Selector = selector;
+        Declarations = declarations;
+    }
+}
