@@ -89,7 +89,7 @@ var options = new ConverterOptions
 
 ## 🎨 Supported CSS Properties
 
-- **Typography**: `color`, `font-size` (pt/px), `font-family`, `font-weight`, `font-style`, `text-decoration`, `text-align`.
+- **Typography**: `color` (hex, rgb/rgba, named), `font-size` (pt/px/em/rem/%), `font-family`, `font-weight`, `font-style`, `text-decoration`, `text-align`.
 - **Layout**: `width`, `height`, `margin` (page-level), `padding`, `background-color` (parsing only).
 - **Inheritance**: Styles correctly cascade from parent containers to text runs; inheritable properties include font and color settings.
 

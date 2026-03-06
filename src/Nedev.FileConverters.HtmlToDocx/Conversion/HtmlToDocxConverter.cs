@@ -316,24 +316,96 @@ public class HtmlToDocxConverter : IDisposable
         return null;
     }
 
-    private static int ParseFontSize(string size)
+    private static int ParseFontSize(string size, int basePt = 12)
     {
-        // Simple parser for px and pt
+        // Extended parser: pt, px, em, rem, %, and bare numbers.
+        // basePt is used for em/rem/% conversions; default is 12pt.
+        if (string.IsNullOrWhiteSpace(size)) return 0;
+        size = size.Trim().ToLowerInvariant();
         try {
-            if (size.EndsWith("pt")) return (int)double.Parse(size.Substring(0, size.Length - 2));
-            if (size.EndsWith("px")) return (int)(double.Parse(size.Substring(0, size.Length - 2)) * 0.75);
-            if (double.TryParse(size, out var val)) return (int)val;
+            if (size.EndsWith("pt"))
+                return (int)double.Parse(size.Substring(0, size.Length - 2));
+            if (size.EndsWith("px"))
+                return (int)(double.Parse(size.Substring(0, size.Length - 2)) * 0.75);
+            if (size.EndsWith("em") || size.EndsWith("rem"))
+            {
+                var num = double.Parse(size.Substring(0, size.Length - (size.EndsWith("rem") ? 3 : 2)));
+                return (int)(num * basePt);
+            }
+            if (size.EndsWith("%"))
+            {
+                var num = double.Parse(size.Substring(0, size.Length - 1));
+                return (int)(basePt * num / 100.0);
+            }
+            if (double.TryParse(size, out var val))
+                return (int)val;
         } catch {}
         return 0;
     }
 
     private static string? ParseColor(string color)
     {
-        if (color.StartsWith("#")) return color;
-        // Basic named colors mapping can be added here
-        return color; 
+        if (string.IsNullOrWhiteSpace(color)) return null;
+        color = color.Trim().ToLowerInvariant();
+        // hex notation
+        if (color.StartsWith("#"))
+        {
+            // expand shorthand #abc to #aabbcc
+            if (color.Length == 4)
+            {
+                var r = color[1]; var g = color[2]; var b = color[3];
+                return $"#{r}{r}{g}{g}{b}{b}";
+            }
+            // ignore alpha channel if present (#rrggbbaa)
+            if (color.Length == 9)
+            {
+                return color.Substring(0, 7);
+            }
+            return color;
+        }
+
+        if (color.StartsWith("rgb("))
+        {
+            var inside = color.Substring(4, color.Length - 5);
+            var parts = inside.Split(',');
+            if (parts.Length == 3 &&
+                byte.TryParse(parts[0], out var r) &&
+                byte.TryParse(parts[1], out var g) &&
+                byte.TryParse(parts[2], out var b))
+            {
+                return $"#{r:X2}{g:X2}{b:X2}".ToLowerInvariant();
+            }
+        }
+        if (color.StartsWith("rgba("))
+        {
+            var inside = color.Substring(5, color.Length - 6);
+            var parts = inside.Split(',');
+            if (parts.Length == 4 &&
+                byte.TryParse(parts[0], out var r) &&
+                byte.TryParse(parts[1], out var g) &&
+                byte.TryParse(parts[2], out var b))
+            {
+                // ignore alpha
+                return $"#{r:X2}{g:X2}{b:X2}".ToLowerInvariant();
+            }
+        }
+
+        // simple HSL not implemented yet
+
+        // named colors
+        if (_namedColors.TryGetValue(color, out var hex))
+            return hex;
+
+        return null;
     }
 
+    private static readonly Dictionary<string, string> _namedColors = new(StringComparer.OrdinalIgnoreCase)
+    {
+        {"black","#000000"}, {"white","#ffffff"}, {"red","#ff0000"}, {"green","#008000"},
+        {"blue","#0000ff"}, {"yellow","#ffff00"}, {"cyan","#00ffff"}, {"magenta","#ff00ff"},
+        {"gray","#808080"}, {"silver","#c0c0c0"}, {"maroon","#800000"}, {"olive","#808000"},
+        {"purple","#800080"}, {"teal","#008080"}, {"navy","#000080"}
+    };
     private async Task<ImageData?> ProcessImage(string src)
     {
         try {
