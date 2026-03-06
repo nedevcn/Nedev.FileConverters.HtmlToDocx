@@ -64,13 +64,20 @@ public sealed class CssParser
             int braceOpen = span.Slice(pos).IndexOf('{');
             if (braceOpen == -1) break;
 
-            var selector = span.Slice(pos, braceOpen).Trim().ToString();
+            // selector list may be comma-separated
+            var rawSelector = span.Slice(pos, braceOpen).Trim().ToString();
             int braceClose = span.Slice(pos + braceOpen).IndexOf('}');
             if (braceClose == -1) break;
 
             var body = span.Slice(pos + braceOpen + 1, braceClose - 1).ToString();
-            rules.Add(new CssRule(selector, ParseInlineStyle(body)));
-            
+
+            // break selectors by comma and create a rule per selector
+            var selectors = rawSelector.Split(',', StringSplitOptions.RemoveEmptyEntries);
+            foreach (var sel in selectors)
+            {
+                rules.Add(new CssRule(sel.Trim(), ParseInlineStyle(body)));
+            }
+
             pos += braceOpen + braceClose + 1;
         }
 

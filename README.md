@@ -10,7 +10,7 @@ High-performance HTML to DOCX converter built on .NET 10 with zero third-party d
 
 - 🚀 **Extreme Performance** - Zero-allocation parsing using `Span<T>` and `ReadOnlySpan<char>`.
 - 📦 **Zero Dependencies** - Pure .NET implementation, no third-party libraries (no OpenXML SDK).
-- 🎨 **Full CSS Engine** - Custom cascading style resolution supporting `<style>` blocks and inline attributes.
+- 🎨 **Full CSS Engine** - Custom cascading style resolution supporting `<style>` blocks and inline attributes. Handles comma‑separated selector lists, descendant (` `) and child (`>`) combinators, class/ID/compound selectors, and proper inheritance.
 - 📊 **Advanced Tables** - Sophisticated grid mapping for complex `colspan` and `rowspan` structures.
 - 🔢 **Nested Lists** - Support for multi-level `<ul>` and `<ol>` with correct numbering indentation.
 - 🖼️ **Multimedia** - Automatic embedding of local, remote (HTTP/S), and Base64 data URI images.
@@ -90,8 +90,8 @@ var options = new ConverterOptions
 ## 🎨 Supported CSS Properties
 
 - **Typography**: `color`, `font-size` (pt/px), `font-family`, `font-weight`, `font-style`, `text-decoration`, `text-align`.
-- **Layout**: `width`, `height`, `margin` (page-level).
-- **Inheritance**: Styles correctly cascade from parent containers to text runs.
+- **Layout**: `width`, `height`, `margin` (page-level), `padding`, `background-color` (parsing only).
+- **Inheritance**: Styles correctly cascade from parent containers to text runs; inheritable properties include font and color settings.
 
 ## ⚡ Performance
 
