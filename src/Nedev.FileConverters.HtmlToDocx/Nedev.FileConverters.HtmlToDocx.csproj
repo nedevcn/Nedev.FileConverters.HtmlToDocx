@@ -10,7 +10,7 @@
     
     <!-- NuGet Package Info -->
     <PackageId>Nedev.FileConverters.HtmlToDocx</PackageId>
-    <Version>1.0.0</Version>
+    <Version>0.1.0</Version>
     <Authors>Nedev</Authors>
     <Description>High-performance HTML to DOCX converter for .NET 10 with zero third-party dependencies</Description>
     <PackageTags>html;docx;converter;word;document;office;openxml</PackageTags>

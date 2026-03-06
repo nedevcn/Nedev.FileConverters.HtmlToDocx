@@ -1,0 +1,13 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2012/06/nuspec.xsd">
+  <metadata>
+    <id>Nedev.FileConverters.HtmlToDocx.Cli</id>
+    <version>0.1.0</version>
+    <authors>Nedev</authors>
+    <description>CLI tool for converting HTML to DOCX format</description>
+    <packageTypes>
+      <packageType name="DotnetTool" />
+    </packageTypes>
+    <repository type="git" commit="12ca8bb11ff947ec3cb3740aea0daee0b3c406f3" />
+  </metadata>
+</package>
