@@ -13,7 +13,7 @@ High-performance HTML to DOCX converter built on .NET 10 with zero third-party d
 - 🎨 **Full CSS Engine** - Custom cascading style resolution supporting `<style>` blocks and inline attributes. Handles comma‑separated selector lists, descendant (` `) and child (`>`) combinators, class/ID/compound selectors, and proper inheritance.
 - 📊 **Advanced Tables** - Sophisticated grid mapping for complex `colspan` and `rowspan` structures.
 - 🔢 **Nested Lists** - Support for multi-level `<ul>` and `<ol>` with correct numbering indentation.
-- 🖼️ **Multimedia** - Automatic embedding of local, remote (HTTP/S), and Base64 data URI images.
+- 🖼️ **Multimedia** - Automatic embedding of local, remote (HTTP/S), and Base64 data URI images with automatic dimension detection.
 - 📐 **Page Layout** - Configurable page size (A4, Letter, etc.) and margins.
 - 📄 **Headers & Footers** - HTML `<header>` and `<footer>` mapped to Word header/footer parts.
 - 🔢 **Page Numbering** - Dynamic PAGE / NUMPAGES fields.
@@ -89,7 +89,9 @@ var options = new ConverterOptions
 
 ## 🎨 Supported CSS Properties
 
-- **Typography**: `color` (hex, rgb/rgba/hsl/hsla/transparent/named), `font-size` (pt/px/em/rem/%), `font-family`, `font-weight`, `font-style`, `text-decoration`, `text-align`.
+- **Typography**: `color` (hex, rgb/rgba/hsl/hsla/transparent/named), `font-size` (pt/px/em/rem/%), `font-family`, `font-weight`, `font-style`, `text-decoration`, `text-align`.  
+  *Paragraphs* now honor `margin-top`/`margin-bottom` (or shorthand) and insert corresponding Word spacing.
+  *Paragraphs* now honor `margin-top`/`margin-bottom` (or shorthand) and insert corresponding Word spacing.
 - **Layout**: `width`, `height`, `margin` (page-level), `padding`, `background-color` (parsing only).
 - **Inheritance**: Styles correctly cascade from parent containers to text runs; inheritable properties include font and color settings.
 

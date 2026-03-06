@@ -24,6 +24,14 @@ public class HtmlToDocxConverter : IDisposable
         _options = options ?? new ConverterOptions();
     }
 
+    // convert css length values to twips (1pt = 20 twips)
+    private static int ParseLengthToTwips(string length, int basePt = 12)
+    {
+        // reuse existing font-size parser with px->pt conversion then multiply by 20
+        var pts = ParseFontSize(length, basePt);
+        return pts * 20;
+    }
+
     public byte[] Convert(string html)
     {
         var document = HtmlDocument.Parse(html);
@@ -59,12 +67,14 @@ public class HtmlToDocxConverter : IDisposable
             case "h5":
             case "h6":
                 var level = int.TryParse(node.TagName.Substring(1), out var l) ? l : 1;
-                builder.StartParagraph($"Heading{level}", GetTextAlign(node));
+                var (beforeH, afterH) = GetMarginSpacing(node);
+                builder.StartParagraph($"Heading{level}", GetTextAlign(node), spacingBeforeTwips: beforeH, spacingAfterTwips: afterH);
                 foreach (var child in node.Children) ConvertNode(child, builder);
                 builder.EndParagraph();
                 return;
             case "p":
-                builder.StartParagraph(textAlign: GetTextAlign(node));
+                var (beforeP, afterP) = GetMarginSpacing(node);
+                builder.StartParagraph(textAlign: GetTextAlign(node), spacingBeforeTwips: beforeP, spacingAfterTwips: afterP);
                 foreach (var child in node.Children) ConvertNode(child, builder);
                 builder.EndParagraph();
                 return;
@@ -262,6 +272,42 @@ public class HtmlToDocxConverter : IDisposable
             sb.Append(ExtractText(child));
         }
         return sb.ToString();
+    }
+
+    private static (int before, int after) GetMarginSpacing(HtmlNode node)
+    {
+        int before = 0, after = 0;
+        if (node.ComputedStyle != null)
+        {
+            if (node.ComputedStyle.TryGetValue("margin-top", out var mt))
+                before = ParseLengthToTwips(mt);
+            if (node.ComputedStyle.TryGetValue("margin-bottom", out var mb))
+                after = ParseLengthToTwips(mb);
+            if ((before == 0 && after == 0) && node.ComputedStyle.TryGetValue("margin", out var m))
+            {
+                var parts = m.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length == 1)
+                {
+                    before = after = ParseLengthToTwips(parts[0]);
+                }
+                else if (parts.Length == 2)
+                {
+                    before = ParseLengthToTwips(parts[0]);
+                    after = ParseLengthToTwips(parts[1]);
+                }
+                else if (parts.Length == 3)
+                {
+                    before = ParseLengthToTwips(parts[0]);
+                    after = ParseLengthToTwips(parts[2]);
+                }
+                else if (parts.Length == 4)
+                {
+                    before = ParseLengthToTwips(parts[0]);
+                    after = ParseLengthToTwips(parts[2]);
+                }
+            }
+        }
+        return (before, after);
     }
 
     private static RunProperties GetRunProperties(HtmlNode node)
@@ -509,8 +555,22 @@ public class HtmlToDocxConverter : IDisposable
 
             if (data.Length > _options.MaxImageSize) return null;
 
-            // Simple size detection or use defaults
-            return new ImageData { Data = data, ContentType = contentType, Width = 300, Height = 200 };
+            int width = 300, height = 200;
+            try
+            {
+                using var ms2 = new MemoryStream(data);
+#pragma warning disable SYSLIB0011 // Image.FromStream is obsolete on some platforms
+                using var img = System.Drawing.Image.FromStream(ms2);
+                width = img.Width;
+                height = img.Height;
+#pragma warning restore SYSLIB0011
+            }
+            catch
+            {
+                // keep defaults if dimension extraction fails
+            }
+
+            return new ImageData { Data = data, ContentType = contentType, Width = width, Height = height };
         } catch { return null; }
     }
 

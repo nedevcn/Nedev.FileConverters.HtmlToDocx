@@ -26,7 +26,7 @@ public sealed class DocumentBuilder
     public void SwitchToFooter() => _currentXml = _footerXml;
     public void SwitchToBody() => _currentXml = _bodyXml;
 
-    public void StartParagraph(string? style = null, string? textAlign = null, int? listNumId = null, int listLevel = 0)
+    public void StartParagraph(string? style = null, string? textAlign = null, int? listNumId = null, int listLevel = 0, int? spacingBeforeTwips = null, int? spacingAfterTwips = null)
     {
         if (_inParagraph) EndParagraph();
         
@@ -36,6 +36,15 @@ public sealed class DocumentBuilder
             _currentXml.Append($"<w:pStyle w:val=\"{style}\"/>");
         if (!string.IsNullOrEmpty(textAlign))
             _currentXml.Append($"<w:jc w:val=\"{textAlign}\"/>");
+        if (spacingBeforeTwips.HasValue || spacingAfterTwips.HasValue)
+        {
+            _currentXml.Append("<w:spacing");
+            if (spacingBeforeTwips.HasValue)
+                _currentXml.Append($" w:before=\"{spacingBeforeTwips.Value}\"");
+            if (spacingAfterTwips.HasValue)
+                _currentXml.Append($" w:after=\"{spacingAfterTwips.Value}\"");
+            _currentXml.Append("/>");
+        }
         
         if (listNumId.HasValue)
         {

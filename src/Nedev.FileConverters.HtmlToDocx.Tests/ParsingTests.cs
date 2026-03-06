@@ -29,6 +29,18 @@ namespace Nedev.FileConverters.HtmlToDocx.Tests
         }
 
         [Theory]
+        [InlineData("12pt", 240)]
+        [InlineData("1em", 240)]
+        [InlineData("2px", 20)]  // 2px -> 1pt -> 20 twips
+        [InlineData("50%", 120)]
+        public void ParseLengthToTwips_ConvertsCorrectly(string input, int expectedTwips)
+        {
+            var method = GetStatic("ParseLengthToTwips");
+            var result = (int)method.Invoke(null, new object[] { input, 12 })!;
+            Assert.Equal(expectedTwips, result);
+        }
+
+        [Theory]
         [InlineData("#ff0000", "#ff0000")]
         [InlineData("#f00", "#ff0000")]
         [InlineData("#ff000080", "#ff0000")]
