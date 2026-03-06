@@ -34,8 +34,12 @@ namespace Nedev.FileConverters.HtmlToDocx.Tests
         [InlineData("#ff000080", "#ff0000")]
         [InlineData("rgb(255,0,0)", "#ff0000")]
         [InlineData("rgba(255,0,0,0.5)", "#ff0000")]
+        [InlineData("hsl(0,100%,50%)", "#ff0000")]
+        [InlineData("hsla(240,100%,50%,0.3)", "#0000ff")]
+        [InlineData("transparent", null)]
         [InlineData("red", "#ff0000")]
         [InlineData("blue", "#0000ff")]
+        [InlineData("orange", "#ffa500")]
         [InlineData("unknown", null)]
         public void ParseColor_VariousFormats(string input, string? expected)
         {

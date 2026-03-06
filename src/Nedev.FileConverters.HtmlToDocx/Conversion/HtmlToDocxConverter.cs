@@ -343,6 +343,41 @@ public class HtmlToDocxConverter : IDisposable
         return 0;
     }
 
+    private static bool ParsePercentage(string s, out double val)
+    {
+        val = 0;
+        s = s.Trim();
+        if (s.EndsWith("%"))
+        {
+            if (double.TryParse(s.Substring(0, s.Length - 1), out var num))
+            {
+                val = num / 100.0;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static (byte r, byte g, byte b) HslToRgb(double h, double s, double l)
+    {
+        h = h % 360;
+        if (h < 0) h += 360;
+        double c = (1 - Math.Abs(2 * l - 1)) * s;
+        double x = c * (1 - Math.Abs((h / 60) % 2 - 1));
+        double m = l - c/2;
+        double r1=0, g1=0, b1=0;
+        if (h < 60) { r1=c; g1=x; b1=0; }
+        else if (h < 120) { r1=x; g1=c; b1=0; }
+        else if (h < 180) { r1=0; g1=c; b1=x; }
+        else if (h < 240) { r1=0; g1=x; b1=c; }
+        else if (h < 300) { r1=x; g1=0; b1=c; }
+        else { r1=c; g1=0; b1=x; }
+        byte r = (byte)Math.Round((r1 + m) * 255);
+        byte g = (byte)Math.Round((g1 + m) * 255);
+        byte b = (byte)Math.Round((b1 + m) * 255);
+        return (r,g,b);
+    }
+
     private static string? ParseColor(string color)
     {
         if (string.IsNullOrWhiteSpace(color)) return null;
@@ -390,7 +425,36 @@ public class HtmlToDocxConverter : IDisposable
             }
         }
 
-        // simple HSL not implemented yet
+        // hsl/hsla support
+        if (color.StartsWith("hsl("))
+        {
+            var inside = color.Substring(4, color.Length - 5);
+            var parts = inside.Split(',');
+            if (parts.Length == 3 &&
+                double.TryParse(parts[0], out var h) &&
+                ParsePercentage(parts[1], out var s) &&
+                ParsePercentage(parts[2], out var l))
+            {
+                var (r, g, b) = HslToRgb(h, s, l);
+                return $"#{r:X2}{g:X2}{b:X2}".ToLowerInvariant();
+            }
+        }
+        if (color.StartsWith("hsla("))
+        {
+            var inside = color.Substring(5, color.Length - 6);
+            var parts = inside.Split(',');
+            if (parts.Length >= 4 &&
+                double.TryParse(parts[0], out var h) &&
+                ParsePercentage(parts[1], out var s) &&
+                ParsePercentage(parts[2], out var l))
+            {
+                var (r, g, b) = HslToRgb(h, s, l);
+                return $"#{r:X2}{g:X2}{b:X2}".ToLowerInvariant();
+            }
+        }
+
+        if (color == "transparent")
+            return null;
 
         // named colors
         if (_namedColors.TryGetValue(color, out var hex))
@@ -404,7 +468,9 @@ public class HtmlToDocxConverter : IDisposable
         {"black","#000000"}, {"white","#ffffff"}, {"red","#ff0000"}, {"green","#008000"},
         {"blue","#0000ff"}, {"yellow","#ffff00"}, {"cyan","#00ffff"}, {"magenta","#ff00ff"},
         {"gray","#808080"}, {"silver","#c0c0c0"}, {"maroon","#800000"}, {"olive","#808000"},
-        {"purple","#800080"}, {"teal","#008080"}, {"navy","#000080"}
+        {"purple","#800080"}, {"teal","#008080"}, {"navy","#000080"},
+        {"lime","#00ff00"}, {"aqua","#00ffff"}, {"fuchsia","#ff00ff"}, {"orange","#ffa500"},
+        {"brown","#a52a2a"}, {"pink","#ffc0cb"}, {"gold","#ffd700"}, {"beige","#f5f5dc"}
     };
     private async Task<ImageData?> ProcessImage(string src)
     {
