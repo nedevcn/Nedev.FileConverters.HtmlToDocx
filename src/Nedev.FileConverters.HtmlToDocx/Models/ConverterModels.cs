@@ -34,6 +34,7 @@ public sealed class RunProperties
     public bool Italic { get; set; }
     public bool Underline { get; set; }
     public string? Color { get; set; }
+    public string? BackgroundColor { get; set; }
     public int FontSize { get; set; } // Points
     public string? FontFamily { get; set; }
 }
@@ -53,6 +54,11 @@ public sealed class TableCell
     public string Text { get; set; } = string.Empty;
     public int ColSpan { get; set; } = 1;
     public RowMergeType RowMerge { get; set; } = RowMergeType.None;
+    public string? BackgroundColor { get; set; }
+    public int PaddingLeft { get; set; }
+    public int PaddingRight { get; set; }
+    public int PaddingTop { get; set; }
+    public int PaddingBottom { get; set; }
 }
 
 public enum RowMergeType

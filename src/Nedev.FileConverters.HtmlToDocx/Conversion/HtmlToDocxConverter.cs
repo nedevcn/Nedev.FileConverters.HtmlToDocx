@@ -68,13 +68,17 @@ public class HtmlToDocxConverter : IDisposable
             case "h6":
                 var level = int.TryParse(node.TagName.Substring(1), out var l) ? l : 1;
                 var (beforeH, afterH) = GetMarginSpacing(node);
-                builder.StartParagraph($"Heading{level}", GetTextAlign(node), spacingBeforeTwips: beforeH, spacingAfterTwips: afterH);
+                var (padLeftH, padRightH) = GetPaddingSpacing(node);
+                var bgH = node.ComputedStyle != null && node.ComputedStyle.TryGetValue("background-color", out var bgc) ? ParseColor(bgc) : null;
+                builder.StartParagraph($"Heading{level}", GetTextAlign(node), spacingBeforeTwips: beforeH, spacingAfterTwips: afterH, indentLeft: padLeftH, indentRight: padRightH, shdColor: bgH);
                 foreach (var child in node.Children) ConvertNode(child, builder);
                 builder.EndParagraph();
                 return;
             case "p":
                 var (beforeP, afterP) = GetMarginSpacing(node);
-                builder.StartParagraph(textAlign: GetTextAlign(node), spacingBeforeTwips: beforeP, spacingAfterTwips: afterP);
+                var (padLeftP, padRightP) = GetPaddingSpacing(node);
+                var bgP = node.ComputedStyle != null && node.ComputedStyle.TryGetValue("background-color", out var bgc2) ? ParseColor(bgc2) : null;
+                builder.StartParagraph(textAlign: GetTextAlign(node), spacingBeforeTwips: beforeP, spacingAfterTwips: afterP, indentLeft: padLeftP, indentRight: padRightP, shdColor: bgP);
                 foreach (var child in node.Children) ConvertNode(child, builder);
                 builder.EndParagraph();
                 return;
@@ -219,6 +223,21 @@ public class HtmlToDocxConverter : IDisposable
                     RowMerge = rowspan > 1 ? RowMergeType.Restart : RowMergeType.None
                 };
 
+                // cell styling
+                if (cellNode.ComputedStyle != null)
+                {
+                    if (cellNode.ComputedStyle.TryGetValue("background-color", out var bgc))
+                        cell.BackgroundColor = ParseColor(bgc);
+                    var (pl, pr) = GetPaddingSpacing(cellNode);
+                    cell.PaddingLeft = pl;
+                    cell.PaddingRight = pr;
+                    // top/bottom padding not used currently
+                    if (cellNode.ComputedStyle.TryGetValue("padding-top", out var pt))
+                        cell.PaddingTop = ParseLengthToTwips(pt);
+                    if (cellNode.ComputedStyle.TryGetValue("padding-bottom", out var pb))
+                        cell.PaddingBottom = ParseLengthToTwips(pb);
+                }
+
                 grid[r, cPos] = cell;
                 maxCols = Math.Max(maxCols, cPos + colspan);
 
@@ -308,6 +327,41 @@ public class HtmlToDocxConverter : IDisposable
             }
         }
         return (before, after);
+    }
+
+    private static (int left, int right) GetPaddingSpacing(HtmlNode node)
+    {
+        int left = 0, right = 0;
+        if (node.ComputedStyle != null)
+        {
+            if (node.ComputedStyle.TryGetValue("padding-left", out var pl))
+                left = ParseLengthToTwips(pl);
+            if (node.ComputedStyle.TryGetValue("padding-right", out var pr))
+                right = ParseLengthToTwips(pr);
+            if ((left == 0 && right == 0) && node.ComputedStyle.TryGetValue("padding", out var p))
+            {
+                var parts = p.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length == 1)
+                {
+                    left = right = ParseLengthToTwips(parts[0]);
+                }
+                else if (parts.Length == 2)
+                {
+                    left = right = ParseLengthToTwips(parts[1]);
+                }
+                else if (parts.Length == 3)
+                {
+                    left = ParseLengthToTwips(parts[1]);
+                    right = ParseLengthToTwips(parts[1]);
+                }
+                else if (parts.Length == 4)
+                {
+                    left = ParseLengthToTwips(parts[3]);
+                    right = ParseLengthToTwips(parts[1]);
+                }
+            }
+        }
+        return (left, right);
     }
 
     private static RunProperties GetRunProperties(HtmlNode node)

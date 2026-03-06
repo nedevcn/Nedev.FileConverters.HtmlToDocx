@@ -26,7 +26,7 @@ public sealed class DocumentBuilder
     public void SwitchToFooter() => _currentXml = _footerXml;
     public void SwitchToBody() => _currentXml = _bodyXml;
 
-    public void StartParagraph(string? style = null, string? textAlign = null, int? listNumId = null, int listLevel = 0, int? spacingBeforeTwips = null, int? spacingAfterTwips = null)
+    public void StartParagraph(string? style = null, string? textAlign = null, int? listNumId = null, int listLevel = 0, int? spacingBeforeTwips = null, int? spacingAfterTwips = null, int? indentLeft = null, int? indentRight = null, string? shdColor = null)
     {
         if (_inParagraph) EndParagraph();
         
@@ -44,6 +44,19 @@ public sealed class DocumentBuilder
             if (spacingAfterTwips.HasValue)
                 _currentXml.Append($" w:after=\"{spacingAfterTwips.Value}\"");
             _currentXml.Append("/>");
+        }
+        if (indentLeft.HasValue || indentRight.HasValue)
+        {
+            _currentXml.Append("<w:ind");
+            if (indentLeft.HasValue)
+                _currentXml.Append($" w:left=\"{indentLeft.Value}\"");
+            if (indentRight.HasValue)
+                _currentXml.Append($" w:right=\"{indentRight.Value}\"");
+            _currentXml.Append("/>");
+        }
+        if (!string.IsNullOrEmpty(shdColor))
+        {
+            _currentXml.Append($"<w:shd w:val=\"clear\" w:fill=\"{shdColor.TrimStart('#')}\"/>");
         }
         
         if (listNumId.HasValue)
@@ -80,6 +93,8 @@ public sealed class DocumentBuilder
             if (props.Underline) _currentXml.Append("<w:u w:val=\"single\"/>");
             if (!string.IsNullOrEmpty(props.Color))
                 _currentXml.Append($"<w:color w:val=\"{props.Color.TrimStart('#')}\"/>");
+            if (!string.IsNullOrEmpty(props.BackgroundColor))
+                _currentXml.Append($"<w:shd w:val=\"clear\" w:fill=\"{props.BackgroundColor.TrimStart('#')}\"/>");
             if (props.FontSize > 0)
                 _currentXml.Append($"<w:sz w:val=\"{props.FontSize * 2}\"/>"); // Half-points
             if (!string.IsNullOrEmpty(props.FontFamily))
@@ -167,11 +182,24 @@ public sealed class DocumentBuilder
                 _currentXml.Append("<w:tc>");
                 _currentXml.Append("<w:tcPr>");
                 if (cell.ColSpan > 1)
-                    _bodyXml.Append($"<w:gridSpan w:val=\"{cell.ColSpan}\"/>");
+                    _currentXml.Append($"<w:gridSpan w:val=\"{cell.ColSpan}\"/>");
                 if (cell.RowMerge == RowMergeType.Restart)
-                    _bodyXml.Append("<w:vMerge w:val=\"restart\"/>");
+                    _currentXml.Append("<w:vMerge w:val=\"restart\"/>");
                 else if (cell.RowMerge == RowMergeType.Continue)
-                    _bodyXml.Append("<w:vMerge/>");
+                    _currentXml.Append("<w:vMerge/>");
+                // background shading
+                if (!string.IsNullOrEmpty(cell.BackgroundColor))
+                    _currentXml.Append($"<w:shd w:val=\"clear\" w:fill=\"{cell.BackgroundColor.TrimStart('#')}\"/>");
+                // cell padding (margins)
+                if (cell.PaddingLeft > 0 || cell.PaddingRight > 0 || cell.PaddingTop > 0 || cell.PaddingBottom > 0)
+                {
+                    _currentXml.Append("<w:tcMar");
+                    if (cell.PaddingTop > 0) _currentXml.Append($" w:top=\"{cell.PaddingTop}\"");
+                    if (cell.PaddingRight > 0) _currentXml.Append($" w:right=\"{cell.PaddingRight}\"");
+                    if (cell.PaddingBottom > 0) _currentXml.Append($" w:bottom=\"{cell.PaddingBottom}\"");
+                    if (cell.PaddingLeft > 0) _currentXml.Append($" w:left=\"{cell.PaddingLeft}\"");
+                    _currentXml.Append("/>");
+                }
                 _currentXml.Append("</w:tcPr>");
 
                 // For now, tables contain simple text paragraphs
