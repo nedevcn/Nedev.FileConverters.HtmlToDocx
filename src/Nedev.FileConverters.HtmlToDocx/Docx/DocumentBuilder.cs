@@ -1,8 +1,8 @@
 using System.Text;
 using System.Collections.Generic;
-using Nedev.HtmlToDocx.Core.Models;
+using Nedev.FileConverters.HtmlToDocx.Core.Models;
 
-namespace Nedev.HtmlToDocx.Core.Docx;
+namespace Nedev.FileConverters.HtmlToDocx.Core.Docx;
 
 public sealed class DocumentBuilder
 {

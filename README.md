@@ -1,8 +1,8 @@
-# Nedev.HtmlToDocx
+# Nedev.FileConverters.HtmlToDocx
 
 [![.NET 10](https://img.shields.io/badge/.NET-10.0-purple)](https://dotnet.microsoft.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![NuGet](https://img.shields.io/nuget/v/Nedev.HtmlToDocx.svg)](https://www.nuget.org/packages/Nedev.HtmlToDocx/)
+[![NuGet](https://img.shields.io/nuget/v/Nedev.FileConverters.HtmlToDocx.svg)](https://www.nuget.org/packages/Nedev.FileConverters.HtmlToDocx/)
 
 High-performance HTML to DOCX converter built on .NET 10 with zero third-party dependencies. Achieves high-fidelity conversion through a custom CSS engine and robust OpenXML generation.
 
@@ -24,13 +24,13 @@ High-performance HTML to DOCX converter built on .NET 10 with zero third-party d
 ### NuGet Package
 
 ```bash
-dotnet add package Nedev.HtmlToDocx
+dotnet add package Nedev.FileConverters.HtmlToDocx
 ```
 
 ### CLI Tool
 
 ```bash
-dotnet tool install --global Nedev.HtmlToDocx.Cli
+dotnet tool install --global Nedev.FileConverters.HtmlToDocx.Cli
 ```
 
 ## 🚀 Quick Start
@@ -38,7 +38,7 @@ dotnet tool install --global Nedev.HtmlToDocx.Cli
 ### Basic Usage
 
 ```csharp
-using Nedev.HtmlToDocx;
+using Nedev.FileConverters.HtmlToDocx;
 
 // Simple conversion
 string html = "<h1>Hello World</h1><p>This is a test.</p>";
@@ -108,7 +108,7 @@ Verified performance on .NET 10:
 ## 🏗️ Architecture
 
 ```
-Nedev.HtmlToDocx/
+Nedev.FileConverters.HtmlToDocx/
 ├── Html/           # Span-based HTML Tokenizer & Tree Builder
 ├── Css/            # Custom CSS Parser & Cascade Resolver
 ├── Docx/           # OpenXML (WordprocessingML) Generator

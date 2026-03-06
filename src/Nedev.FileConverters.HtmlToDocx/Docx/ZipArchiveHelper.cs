@@ -1,6 +1,6 @@
 using System.IO.Compression;
 
-namespace Nedev.HtmlToDocx.Core.Docx;
+namespace Nedev.FileConverters.HtmlToDocx.Core.Docx;
 
 public sealed class ZipArchiveHelper : IDisposable
 {

@@ -6,12 +6,12 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.IO;
 using System.Text;
-using Nedev.HtmlToDocx.Core.Docx;
-using Nedev.HtmlToDocx.Core.Html;
-using Nedev.HtmlToDocx.Core.Css;
-using Nedev.HtmlToDocx.Core.Models;
+using Nedev.FileConverters.HtmlToDocx.Core.Docx;
+using Nedev.FileConverters.HtmlToDocx.Core.Html;
+using Nedev.FileConverters.HtmlToDocx.Core.Css;
+using Nedev.FileConverters.HtmlToDocx.Core.Models;
 
-namespace Nedev.HtmlToDocx.Core.Conversion;
+namespace Nedev.FileConverters.HtmlToDocx.Core.Conversion;
 
 public class HtmlToDocxConverter : IDisposable
 {

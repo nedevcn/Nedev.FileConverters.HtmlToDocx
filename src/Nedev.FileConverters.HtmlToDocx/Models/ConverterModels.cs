@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Nedev.HtmlToDocx.Core.Models;
+namespace Nedev.FileConverters.HtmlToDocx.Core.Models;
 
 public class ConverterOptions
 {

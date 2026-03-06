@@ -9,14 +9,17 @@
     
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>htmltodocx</ToolCommandName>
-    <PackageId>Nedev.HtmlToDocx.Cli</PackageId>
+    <PackageId>Nedev.FileConverters.HtmlToDocx.Cli</PackageId>
     <Version>1.0.0</Version>
     <Authors>Nedev</Authors>
     <Description>CLI tool for converting HTML to DOCX format</Description>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Nedev.HtmlToDocx\Nedev.HtmlToDocx.csproj" />
+    <ProjectReference Include="..\Nedev.FileConverters.HtmlToDocx\Nedev.FileConverters.HtmlToDocx.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Nedev.FileConverters.Core" Version="0.1.0" />
   </ItemGroup>
 
 </Project>

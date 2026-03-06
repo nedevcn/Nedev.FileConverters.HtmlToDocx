@@ -1,4 +1,4 @@
-namespace Nedev.HtmlToDocx.Core.Html;
+namespace Nedev.FileConverters.HtmlToDocx.Core.Html;
 
 public readonly struct HtmlAttribute
 {

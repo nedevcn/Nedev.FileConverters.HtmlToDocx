@@ -2,9 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace Nedev.HtmlToDocx.Core.Css;
+namespace Nedev.FileConverters.HtmlToDocx.Core.Css;
 
-using Nedev.HtmlToDocx.Core.Html;
+using Nedev.FileConverters.HtmlToDocx.Core.Html;
 
 public sealed class StyleResolver
 {

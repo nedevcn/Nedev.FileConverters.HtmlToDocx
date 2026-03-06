@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Net;
 
-namespace Nedev.HtmlToDocx.Core.Html;
+namespace Nedev.FileConverters.HtmlToDocx.Core.Html;
 
 public ref struct HtmlParser
 {

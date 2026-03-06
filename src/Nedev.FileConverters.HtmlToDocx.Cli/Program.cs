@@ -1,12 +1,12 @@
-using Nedev.HtmlToDocx;
+using Nedev.FileConverters.HtmlToDocx;
 
-namespace Nedev.HtmlToDocx.Cli;
+namespace Nedev.FileConverters.HtmlToDocx.Cli;
 
 class Program
 {
     static async Task<int> Main(string[] args)
     {
-        Console.WriteLine("Nedev.HtmlToDocx - High Performance HTML to DOCX Converter");
+        Console.WriteLine("Nedev.FileConverters.HtmlToDocx - High Performance HTML to DOCX Converter");
         Console.WriteLine("==========================================================");
         Console.WriteLine();
 

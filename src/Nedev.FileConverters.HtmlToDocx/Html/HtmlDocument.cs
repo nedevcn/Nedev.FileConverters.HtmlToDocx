@@ -1,7 +1,7 @@
 using System.Collections.Generic;
-using Nedev.HtmlToDocx.Core.Css;
+using Nedev.FileConverters.HtmlToDocx.Core.Css;
 
-namespace Nedev.HtmlToDocx.Core.Html;
+namespace Nedev.FileConverters.HtmlToDocx.Core.Html;
 
 public class HtmlNode
 {

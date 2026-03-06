@@ -1,8 +1,8 @@
-using Nedev.HtmlToDocx.Core.Conversion;
-using Nedev.HtmlToDocx.Core.Docx;
-using Nedev.HtmlToDocx.Core.Models;
+using Nedev.FileConverters.HtmlToDocx.Core.Conversion;
+using Nedev.FileConverters.HtmlToDocx.Core.Docx;
+using Nedev.FileConverters.HtmlToDocx.Core.Models;
 
-namespace Nedev.HtmlToDocx;
+namespace Nedev.FileConverters.HtmlToDocx;
 
 public sealed class HtmlToDocxService : IDisposable
 {

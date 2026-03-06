@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Nedev.HtmlToDocx.Core.Css;
+namespace Nedev.FileConverters.HtmlToDocx.Core.Css;
 
 public sealed class CssParser
 {

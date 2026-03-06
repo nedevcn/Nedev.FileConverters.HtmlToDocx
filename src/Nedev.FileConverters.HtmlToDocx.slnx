@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="Nedev.FileConverters.HtmlToDocx.Cli/Nedev.FileConverters.HtmlToDocx.Cli.csproj" />
+  <Project Path="Nedev.FileConverters.HtmlToDocx/Nedev.FileConverters.HtmlToDocx.csproj" />
+</Solution>
