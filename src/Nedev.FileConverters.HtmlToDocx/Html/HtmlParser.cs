@@ -8,17 +8,27 @@ public ref struct HtmlParser
 {
     private ReadOnlySpan<char> _input;
     private int _position;
+    private string? _rawTextTagName;
+
+    private static readonly HashSet<string> VoidTags = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"
+    };
 
     public HtmlParser(ReadOnlySpan<char> input)
     {
         _input = input;
         _position = 0;
+        _rawTextTagName = null;
     }
 
     public HtmlToken ParseNext()
     {
-        SkipWhitespace();
         if (_position >= _input.Length) return HtmlToken.EofToken();
+
+        if (_rawTextTagName != null)
+            return ParseRawText();
+
         if (_input[_position] == '<') return ParseTag();
         return ParseText();
     }
@@ -84,8 +94,24 @@ public ref struct HtmlParser
         }
         if (_position < _input.Length && _input[_position] == '>') _position++;
 
-        if (isEndTag) return HtmlToken.EndTagToken(tagName);
-        if (isSelfClosing) return HtmlToken.SelfClosingTagToken(tagName, attributes);
+        if (isEndTag)
+        {
+            return HtmlToken.EndTagToken(tagName);
+        }
+
+        // HTML void elements are self-closing even without an explicit "/>".
+        if (isSelfClosing || VoidTags.Contains(tagName))
+        {
+            return HtmlToken.SelfClosingTagToken(tagName, attributes);
+        }
+
+        // Rawtext elements: treat content as text until the matching end tag.
+        if (tagName.Equals("style", StringComparison.OrdinalIgnoreCase) ||
+            tagName.Equals("script", StringComparison.OrdinalIgnoreCase))
+        {
+            _rawTextTagName = tagName;
+        }
+
         return HtmlToken.StartTagToken(tagName, attributes);
     }
 
@@ -143,6 +169,29 @@ public ref struct HtmlParser
         int start = _position;
         while (_position < _input.Length && _input[_position] != '<') _position++;
         return HtmlToken.TextToken(WebUtility.HtmlDecode(_input.Slice(start, _position - start).ToString()));
+    }
+
+    private HtmlToken ParseRawText()
+    {
+        // Read until the next `</tagname` (case-insensitive). Don't consume the end tag;
+        // the next ParseNext() call will parse it normally.
+        var tagName = _rawTextTagName!;
+        var remaining = _input.Slice(_position);
+        var endNeedle = $"</{tagName}";
+        int idx = remaining.IndexOf(endNeedle.AsSpan(), StringComparison.OrdinalIgnoreCase);
+
+        _rawTextTagName = null;
+
+        if (idx < 0)
+        {
+            // No closing tag found; treat rest as text.
+            _position = _input.Length;
+            return HtmlToken.TextToken(remaining.ToString());
+        }
+
+        var content = remaining.Slice(0, idx).ToString();
+        _position += idx;
+        return HtmlToken.TextToken(content);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

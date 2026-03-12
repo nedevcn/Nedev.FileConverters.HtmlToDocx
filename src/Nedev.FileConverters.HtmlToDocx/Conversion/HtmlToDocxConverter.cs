@@ -18,6 +18,39 @@ public class HtmlToDocxConverter : IDisposable
     private readonly ConverterOptions _options;
     private readonly Stack<(int NumId, int Level)> _listStack = new();
     private readonly HttpClient _httpClient = new();
+    private const int MaxNumberingLevel = 8;
+    private const int ListBaseIndentLeft = 720;
+    private const int ListHangingIndent = 360;
+    private static readonly string[] BulletLvlText =
+    {
+        "", // Symbol bullet
+        "o", // ASCII 'o'
+        "", // Wingdings square bullet
+        "·",
+        "o",
+        "",
+        "·",
+        "o",
+        ""
+    };
+
+    private static readonly string[] BulletFonts =
+    {
+        "Symbol",
+        "Courier New",
+        "Wingdings",
+        "Symbol",
+        "Courier New",
+        "Wingdings",
+        "Symbol",
+        "Courier New",
+        "Wingdings"
+    };
+
+    private static string GetBulletChar(int level) => BulletLvlText[Math.Min(level, BulletLvlText.Length - 1)];
+    private static string GetBulletFont(int level) => BulletFonts[Math.Min(level, BulletFonts.Length - 1)];
+    private static int GetListLeftIndent(int level) => ListBaseIndentLeft * (level + 1);
+    private static int GetListTabPos(int level) => GetListLeftIndent(level);
 
     public HtmlToDocxConverter(ConverterOptions? options = null)
     {
@@ -86,21 +119,115 @@ public class HtmlToDocxConverter : IDisposable
                 ConvertTable(node, builder);
                 return;
             case "ul":
-                _listStack.Push((1, _listStack.Count)); // 1 for Bullet
+                _listStack.Push((1, Math.Min(_listStack.Count, MaxNumberingLevel))); // 1 for Bullet
                 foreach (var child in node.Children) ConvertNode(child, builder);
                 _listStack.Pop();
                 return;
             case "ol":
-                _listStack.Push((2, _listStack.Count)); // 2 for Numbered
+                _listStack.Push((2, Math.Min(_listStack.Count, MaxNumberingLevel))); // 2 for Numbered
                 foreach (var child in node.Children) ConvertNode(child, builder);
                 _listStack.Pop();
                 return;
             case "li":
                 if (_listStack.TryPeek(out var listInfo))
                 {
-                    builder.StartParagraph(listNumId: listInfo.NumId, listLevel: listInfo.Level);
-                    foreach (var child in node.Children) ConvertNode(child, builder);
-                    builder.EndParagraph();
+                    var numId = listInfo.NumId;
+                    var listLevel = Math.Min(listInfo.Level, MaxNumberingLevel);
+                    int continuationIndentLeft = GetListLeftIndent(listLevel);
+
+                    bool paragraphStarted = false;
+                    bool markerUsed = false;
+
+                    void StartListPara(HtmlNode? sourceForStyle = null)
+                    {
+                        if (paragraphStarted) return;
+
+                        if (!markerUsed)
+                        {
+                            StartParagraphLikeNode(sourceForStyle, builder, listNumId: numId, listLevel: listLevel);
+                            markerUsed = true;
+                        }
+                        else
+                        {
+                            StartParagraphLikeNode(
+                                sourceForStyle,
+                                builder,
+                                indentLeft: continuationIndentLeft,
+                                indentHanging: ListHangingIndent,
+                                tabPos: continuationIndentLeft
+                            );
+                        }
+
+                        paragraphStarted = true;
+                    }
+
+                    void EndParaIfAny()
+                    {
+                        if (!paragraphStarted) return;
+                        builder.EndParagraph();
+                        paragraphStarted = false;
+                    }
+
+                    void EnsureMarkerIfNeeded()
+                    {
+                        if (markerUsed) return;
+                        StartParagraphLikeNode(null, builder, listNumId: numId, listLevel: listLevel);
+                        builder.EndParagraph();
+                        markerUsed = true;
+                    }
+
+                    foreach (var child in node.Children)
+                    {
+                        // Handle common block tags inside <li> as part of the same list item.
+                        if (IsParagraphLikeBlock(child))
+                        {
+                            EndParaIfAny();
+                            StartListPara(child);
+                            foreach (var gc in child.Children) ConvertNode(gc, builder);
+                            EndParaIfAny();
+                            continue;
+                        }
+
+                        if (IsContainerBlock(child))
+                        {
+                            EndParaIfAny();
+                            foreach (var gc in child.Children)
+                            {
+                                // treat container children as if they were direct children of <li>
+                                if (IsParagraphLikeBlock(gc))
+                                {
+                                    StartListPara(gc);
+                                    foreach (var gg in gc.Children) ConvertNode(gg, builder);
+                                    EndParaIfAny();
+                                }
+                                else if (IsHardBlock(gc))
+                                {
+                                    EnsureMarkerIfNeeded();
+                                    ConvertNode(gc, builder);
+                                }
+                                else
+                                {
+                                    StartListPara();
+                                    ConvertNode(gc, builder);
+                                }
+                            }
+                            continue;
+                        }
+
+                        if (IsHardBlock(child))
+                        {
+                            EndParaIfAny();
+                            EnsureMarkerIfNeeded();
+                            ConvertNode(child, builder);
+                            continue;
+                        }
+
+                        // Inline content
+                        StartListPara();
+                        ConvertNode(child, builder);
+                    }
+
+                    EndParaIfAny();
                 }
                 else
                 {
@@ -111,7 +238,7 @@ public class HtmlToDocxConverter : IDisposable
                 }
                 return;
             case "br":
-                builder.AddRun("\r"); // Simpler for now, or builder.AddBreak()
+                builder.AddBreak();
                 return;
             case "#text":
                 builder.AddRun(node.Text, GetRunProperties(node));
@@ -638,21 +765,172 @@ public class HtmlToDocxConverter : IDisposable
 
     private static string GetNumberingXml()
     {
-        return "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>" +
-               "<w:numbering xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">" +
-               "<w:abstractNum w:abstractNumId=\"0\">" +
-               "<w:multiLevelType w:val=\"hybridMultilevel\"/>" +
-               "<w:lvl w:ilvl=\"0\"><w:start w:val=\"1\"/><w:numFmt w:val=\"bullet\"/><w:lvlText w:val=\"\"/><w:lvlJc w:val=\"left\"/><w:pPr><w:ind w:left=\"720\" w:hanging=\"360\"/></w:pPr><w:rPr><w:rFonts w:ascii=\"Symbol\" w:hAnsi=\"Symbol\" w:hint=\"default\"/></w:rPr></w:lvl>" +
-               "<w:lvl w:ilvl=\"1\"><w:start w:val=\"1\"/><w:numFmt w:val=\"bullet\"/><w:lvlText w:val=\"o\"/><w:lvlJc w:val=\"left\"/><w:pPr><w:ind w:left=\"1440\" w:hanging=\"360\"/></w:pPr><w:rPr><w:rFonts w:ascii=\"Courier New\" w:hAnsi=\"Courier New\" w:hint=\"default\"/></w:rPr></w:lvl>" +
-               "</w:abstractNum>" +
-               "<w:abstractNum w:abstractNumId=\"1\">" +
-               "<w:multiLevelType w:val=\"hybridMultilevel\"/>" +
-               "<w:lvl w:ilvl=\"0\"><w:start w:val=\"1\"/><w:numFmt w:val=\"decimal\"/><w:lvlText w:val=\"%1.\"/><w:lvlJc w:val=\"left\"/><w:pPr><w:ind w:left=\"720\" w:hanging=\"360\"/></w:pPr></w:lvl>" +
-               "<w:lvl w:ilvl=\"1\"><w:start w:val=\"1\"/><w:numFmt w:val=\"decimal\"/><w:lvlText w:val=\"%1.%2.\"/><w:lvlJc w:val=\"left\"/><w:pPr><w:ind w:left=\"1440\" w:hanging=\"360\"/></w:pPr></w:lvl>" +
-               "</w:abstractNum>" +
-               "<w:num w:numId=\"1\"><w:abstractNumId w:val=\"0\"/></w:num>" +
-               "<w:num w:numId=\"2\"><w:abstractNumId w:val=\"1\"/></w:num>" +
-               "</w:numbering>";
+        var sb = new StringBuilder();
+        sb.Append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>");
+        sb.Append("<w:numbering xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">");
+
+        // abstractNumId=0: bullets
+        sb.Append("<w:abstractNum w:abstractNumId=\"0\">");
+        sb.Append("<w:multiLevelType w:val=\"hybridMultilevel\"/>");
+        for (int lvl = 0; lvl <= MaxNumberingLevel; lvl++)
+        {
+            int left = GetListLeftIndent(lvl);
+            int tabPos = GetListTabPos(lvl);
+            sb.Append($"<w:lvl w:ilvl=\"{lvl}\">");
+            sb.Append("<w:start w:val=\"1\"/>");
+            sb.Append("<w:numFmt w:val=\"bullet\"/>");
+            sb.Append($"<w:lvlText w:val=\"{GetBulletChar(lvl)}\"/>");
+            sb.Append("<w:suff w:val=\"space\"/>");
+            sb.Append("<w:lvlJc w:val=\"left\"/>");
+            sb.Append("<w:pPr>");
+            sb.Append($"<w:tabs><w:tab w:val=\"num\" w:pos=\"{tabPos}\"/></w:tabs>");
+            sb.Append($"<w:ind w:left=\"{left}\" w:hanging=\"{ListHangingIndent}\"/>");
+            sb.Append("</w:pPr>");
+            var font = GetBulletFont(lvl);
+            sb.Append($"<w:rPr><w:rFonts w:ascii=\"{font}\" w:hAnsi=\"{font}\" w:hint=\"default\"/></w:rPr>");
+            sb.Append("</w:lvl>");
+        }
+        sb.Append("</w:abstractNum>");
+
+        // abstractNumId=1: decimal numbering
+        sb.Append("<w:abstractNum w:abstractNumId=\"1\">");
+        sb.Append("<w:multiLevelType w:val=\"hybridMultilevel\"/>");
+        for (int lvl = 0; lvl <= MaxNumberingLevel; lvl++)
+        {
+            int left = GetListLeftIndent(lvl);
+            int tabPos = GetListTabPos(lvl);
+            sb.Append($"<w:lvl w:ilvl=\"{lvl}\">");
+            sb.Append("<w:start w:val=\"1\"/>");
+            sb.Append($"<w:numFmt w:val=\"{GetNumberFmt(lvl)}\"/>");
+            sb.Append($"<w:lvlText w:val=\"{BuildLvlText(lvl)}\"/>");
+            sb.Append("<w:suff w:val=\"space\"/>");
+            sb.Append("<w:lvlJc w:val=\"left\"/>");
+            sb.Append("<w:pPr>");
+            sb.Append($"<w:tabs><w:tab w:val=\"num\" w:pos=\"{tabPos}\"/></w:tabs>");
+            sb.Append($"<w:ind w:left=\"{left}\" w:hanging=\"{ListHangingIndent}\"/>");
+            sb.Append("</w:pPr>");
+            sb.Append("</w:lvl>");
+        }
+        sb.Append("</w:abstractNum>");
+
+        // concrete nums
+        sb.Append("<w:num w:numId=\"1\"><w:abstractNumId w:val=\"0\"/></w:num>");
+        sb.Append("<w:num w:numId=\"2\"><w:abstractNumId w:val=\"1\"/></w:num>");
+        sb.Append("</w:numbering>");
+        return sb.ToString();
+    }
+
+    private static bool IsBlockInsideListItem(HtmlNode node)
+    {
+        var tag = node.TagName;
+        if (tag == "#text") return false;
+        if (tag == "br" || tag == "span" || tag == "a" || tag == "b" || tag == "strong" || tag == "i" || tag == "em" || tag == "u" || tag == "font" || tag == "img")
+            return false;
+
+        // Lists and tables are block for our purposes; also paragraphs/divs/headings.
+        return tag == "ul" || tag == "ol" || tag == "table" || tag == "p" || tag == "div" ||
+               tag == "h1" || tag == "h2" || tag == "h3" || tag == "h4" || tag == "h5" || tag == "h6";
+    }
+
+    private static bool IsParagraphLikeBlock(HtmlNode node)
+    {
+        var tag = node.TagName;
+        return tag == "p" ||
+               tag == "h1" || tag == "h2" || tag == "h3" || tag == "h4" || tag == "h5" || tag == "h6";
+    }
+
+    private static bool IsContainerBlock(HtmlNode node)
+    {
+        // A container that often wraps other blocks inside <li>.
+        return node.TagName == "div" || node.TagName == "section" || node.TagName == "article";
+    }
+
+    private static bool IsHardBlock(HtmlNode node)
+    {
+        // Blocks that must be emitted as-is (nested lists, tables).
+        return node.TagName == "ul" || node.TagName == "ol" || node.TagName == "table";
+    }
+
+    private static void StartParagraphLikeNode(HtmlNode? node, DocumentBuilder builder, int? listNumId = null, int listLevel = 0, int? indentLeft = null, int? indentHanging = null, int? tabPos = null)
+    {
+        if (node == null)
+        {
+            builder.StartParagraph(
+                style: (listNumId.HasValue || indentHanging.HasValue) ? "ListParagraph" : null,
+                listNumId: listNumId,
+                listLevel: listLevel,
+                indentLeft: indentLeft,
+                indentHanging: indentHanging,
+                tabPos: tabPos
+            );
+            return;
+        }
+
+        string? style = null;
+        if (node.TagName.Length == 2 && (node.TagName[0] == 'h' || node.TagName[0] == 'H') && char.IsDigit(node.TagName[1]))
+        {
+            int level = int.TryParse(node.TagName.Substring(1), out var l) ? l : 1;
+            style = $"Heading{level}";
+        }
+        else if (listNumId.HasValue || indentHanging.HasValue)
+        {
+            style = "ListParagraph";
+        }
+
+        var (before, after) = GetMarginSpacing(node);
+        var (padLeft, padRight) = GetPaddingSpacing(node);
+        var bg = node.ComputedStyle != null && node.ComputedStyle.TryGetValue("background-color", out var bgc) ? ParseColor(bgc) : null;
+        var textAlign = GetTextAlign(node);
+
+        // When this paragraph is a list marker paragraph, let numbering.xml control indentation;
+        // don't mix CSS padding into <w:ind> (it can lead to doubled indentation).
+        int? resolvedIndentLeft = indentLeft;
+        int? resolvedIndentRight = null;
+        if (!listNumId.HasValue)
+        {
+            resolvedIndentLeft ??= padLeft;
+            resolvedIndentRight = padRight;
+        }
+
+        builder.StartParagraph(
+            style: style,
+            textAlign: textAlign,
+            listNumId: listNumId,
+            listLevel: listLevel,
+            spacingBeforeTwips: before,
+            spacingAfterTwips: after,
+            indentLeft: resolvedIndentLeft,
+            indentRight: resolvedIndentRight,
+            shdColor: bg,
+            indentHanging: indentHanging,
+            tabPos: tabPos
+        );
+    }
+
+    private static string GetNumberFmt(int level)
+    {
+        // A slightly nicer default than "decimal everywhere", but still stable for Word.
+        return level switch
+        {
+            0 => "decimal",
+            1 => "lowerLetter",
+            2 => "lowerRoman",
+            _ => "decimal"
+        };
+    }
+
+    private static string BuildLvlText(int level)
+    {
+        // 0 -> %1. ; 1 -> %1.%2. ; etc.
+        var sb = new StringBuilder();
+        for (int i = 1; i <= level + 1; i++)
+        {
+            if (i > 1) sb.Append('.');
+            sb.Append('%');
+            sb.Append(i);
+        }
+        sb.Append('.');
+        return sb.ToString();
     }
 
     private static byte[] BuildDocx(string documentXml, string? relationsXml = null, List<(string Name, byte[] Data)>? media = null, string? stylesXml = null, string? fontsXml = null, string? headerXml = null, string? footerXml = null)

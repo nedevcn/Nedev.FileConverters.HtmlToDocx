@@ -26,7 +26,7 @@ public sealed class DocumentBuilder
     public void SwitchToFooter() => _currentXml = _footerXml;
     public void SwitchToBody() => _currentXml = _bodyXml;
 
-    public void StartParagraph(string? style = null, string? textAlign = null, int? listNumId = null, int listLevel = 0, int? spacingBeforeTwips = null, int? spacingAfterTwips = null, int? indentLeft = null, int? indentRight = null, string? shdColor = null)
+    public void StartParagraph(string? style = null, string? textAlign = null, int? listNumId = null, int listLevel = 0, int? spacingBeforeTwips = null, int? spacingAfterTwips = null, int? indentLeft = null, int? indentRight = null, string? shdColor = null, int? indentHanging = null, int? tabPos = null)
     {
         if (_inParagraph) EndParagraph();
         
@@ -45,13 +45,21 @@ public sealed class DocumentBuilder
                 _currentXml.Append($" w:after=\"{spacingAfterTwips.Value}\"");
             _currentXml.Append("/>");
         }
-        if (indentLeft.HasValue || indentRight.HasValue)
+        if (tabPos.HasValue)
+        {
+            _currentXml.Append("<w:tabs>");
+            _currentXml.Append($"<w:tab w:val=\"num\" w:pos=\"{tabPos.Value}\"/>");
+            _currentXml.Append("</w:tabs>");
+        }
+        if (indentLeft.HasValue || indentRight.HasValue || indentHanging.HasValue)
         {
             _currentXml.Append("<w:ind");
             if (indentLeft.HasValue)
                 _currentXml.Append($" w:left=\"{indentLeft.Value}\"");
             if (indentRight.HasValue)
                 _currentXml.Append($" w:right=\"{indentRight.Value}\"");
+            if (indentHanging.HasValue)
+                _currentXml.Append($" w:hanging=\"{indentHanging.Value}\"");
             _currentXml.Append("/>");
         }
         if (!string.IsNullOrEmpty(shdColor))
@@ -113,9 +121,15 @@ public sealed class DocumentBuilder
         var relId = $"rId{++_relCount}";
         _relationships.Add((relId, url, "hyperlink"));
 
-        _bodyXml.Append($"<w:hyperlink r:id=\"{relId}\">");
+        _currentXml.Append($"<w:hyperlink r:id=\"{relId}\">");
         AddRun(text, props ?? new RunProperties { Color = "0000FF", Underline = true });
-        _bodyXml.Append("</w:hyperlink>");
+        _currentXml.Append("</w:hyperlink>");
+    }
+
+    public void AddBreak()
+    {
+        if (!_inParagraph) StartParagraph();
+        _currentXml.Append("<w:r><w:br/></w:r>");
     }
 
     public void AddImage(byte[] data, string contentType, int widthPx = 300, int heightPx = 200)
@@ -290,6 +304,7 @@ public sealed class DocumentBuilder
                "<w:styles xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\">" +
                "<w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii=\"Calibri\" w:hAnsi=\"Calibri\"/><w:sz w:val=\"22\"/></w:rPr></w:rPrDefault></w:docDefaults>" +
                "<w:style w:type=\"paragraph\" w:default=\"1\" w:styleId=\"Normal\"><w:name w:val=\"Normal\"/><w:qFormat/></w:style>" +
+               "<w:style w:type=\"paragraph\" w:styleId=\"ListParagraph\"><w:name w:val=\"List Paragraph\"/><w:basedOn w:val=\"Normal\"/><w:qFormat/></w:style>" +
                "<w:style w:type=\"paragraph\" w:styleId=\"Heading1\"><w:name w:val=\"heading 1\"/><w:next w:val=\"Normal\"/><w:qFormat/><w:pPr><w:outlineLvl w:val=\"0\"/></w:pPr><w:rPr><w:b/><w:sz w:val=\"32\"/></w:rPr></w:style>" +
                "<w:style w:type=\"paragraph\" w:styleId=\"Heading2\"><w:name w:val=\"heading 2\"/><w:next w:val=\"Normal\"/><w:qFormat/><w:pPr><w:outlineLvl w:val=\"1\"/></w:pPr><w:rPr><w:b/><w:sz w:val=\"28\"/></w:rPr></w:style>" +
                "<w:style w:type=\"paragraph\" w:styleId=\"Heading3\"><w:name w:val=\"heading 3\"/><w:next w:val=\"Normal\"/><w:qFormat/><w:pPr><w:outlineLvl w:val=\"2\"/></w:pPr><w:rPr><w:b/><w:sz w:val=\"24\"/></w:rPr></w:style>" +

@@ -50,6 +50,37 @@ namespace Nedev.FileConverters.HtmlToDocx.Tests
         }
 
         [Fact]
+        public void MatchesSelector_AttributeSelectors()
+        {
+            var node = MakeNode("p");
+            node.Attributes["data-foo"] = "bar";
+            Assert.True(InvokeMatches(node, "[data-foo]") );
+            Assert.True(InvokeMatches(node, "p[data-foo=bar]") );
+            Assert.False(InvokeMatches(node, "[data-foo=baz]") );
+        }
+
+        [Fact]
+        public void MatchesSelector_SiblingCombinators()
+        {
+            var parent = MakeNode("div");
+            var a = MakeNode("p");
+            var b = MakeNode("span");
+            var c = MakeNode("p");
+            a.Parent = parent;
+            b.Parent = parent;
+            c.Parent = parent;
+            parent.Children.Add(a);
+            parent.Children.Add(b);
+            parent.Children.Add(c);
+
+            Assert.True(InvokeMatches(b, "p + span"));
+            Assert.False(InvokeMatches(c, "p + span"));
+
+            Assert.True(InvokeMatches(c, "p ~ p"));
+            Assert.False(InvokeMatches(a, "p ~ p"));
+        }
+
+        [Fact]
         public void MatchesSelector_ChildCombinator()
         {
             var root = MakeNode("div");
