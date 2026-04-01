@@ -319,9 +319,16 @@ public class HtmlToDocxConverter : IDisposable
 
     private void ConvertTable(HtmlNode node, DocumentBuilder builder)
     {
+        var tableData = BuildTableData(node, builder);
+        if (tableData.Rows.Count == 0) return;
+        builder.AddTable(tableData);
+    }
+
+    private TableData BuildTableData(HtmlNode node, DocumentBuilder builder)
+    {
         var trNodes = node.Children.Where(c => c.TagName == "tr").ToList();
         if (!trNodes.Any()) trNodes = node.Children.SelectMany(c => c.Children).Where(c => c.TagName == "tr").ToList();
-        if (!trNodes.Any()) return;
+        if (!trNodes.Any()) return new TableData();
 
         int rowCount = trNodes.Count;
         // Accurate column count estimation is hard, use a safe buffer
@@ -346,6 +353,7 @@ public class HtmlToDocxConverter : IDisposable
 
                 var cell = new TableCell { 
                     Text = ExtractText(cellNode), 
+                    ContentXml = BuildTableCellContentXml(cellNode, builder),
                     ColSpan = colspan,
                     RowMerge = rowspan > 1 ? RowMergeType.Restart : RowMergeType.None
                 };
@@ -404,7 +412,7 @@ public class HtmlToDocxConverter : IDisposable
             }
             tableData.Rows.Add(row);
         }
-        builder.AddTable(tableData);
+        return tableData;
     }
 
     private static string ExtractText(HtmlNode node)
@@ -418,6 +426,529 @@ public class HtmlToDocxConverter : IDisposable
             sb.Append(ExtractText(child));
         }
         return sb.ToString();
+    }
+
+    private string BuildTableCellContentXml(HtmlNode cellNode, DocumentBuilder builder)
+    {
+        var sb = new StringBuilder();
+        bool paragraphOpen = false;
+        bool wroteContent = false;
+
+        void StartParagraph(HtmlNode? source = null)
+        {
+            if (paragraphOpen) return;
+
+            sb.Append("<w:p>");
+            var hasParagraphProps = false;
+            var pPr = new StringBuilder();
+
+            if (source != null)
+            {
+                if (source.TagName.Length == 2 && (source.TagName[0] == 'h' || source.TagName[0] == 'H') && char.IsDigit(source.TagName[1]))
+                {
+                    var level = int.TryParse(source.TagName.Substring(1), out var parsedLevel) ? parsedLevel : 1;
+                    pPr.Append($"<w:pStyle w:val=\"Heading{level}\"/>");
+                    hasParagraphProps = true;
+                }
+
+                var align = GetTextAlign(source);
+                if (!string.IsNullOrEmpty(align))
+                {
+                    pPr.Append($"<w:jc w:val=\"{align}\"/>");
+                    hasParagraphProps = true;
+                }
+            }
+
+            if (hasParagraphProps)
+            {
+                sb.Append("<w:pPr>");
+                sb.Append(pPr);
+                sb.Append("</w:pPr>");
+            }
+
+            paragraphOpen = true;
+            wroteContent = true;
+        }
+
+        void EndParagraph()
+        {
+            if (!paragraphOpen) return;
+            sb.Append("</w:p>");
+            paragraphOpen = false;
+        }
+
+        void AddRun(string text, RunProperties props)
+        {
+            if (string.IsNullOrEmpty(text)) return;
+            StartParagraph();
+            sb.Append(BuildRunXml(text, props));
+        }
+
+        void AddHyperlinkNode(HtmlNode node)
+        {
+            var href = node.GetAttribute("href");
+            if (string.IsNullOrWhiteSpace(href))
+            {
+                RenderChildrenAsInline(node);
+                return;
+            }
+
+            StartParagraph();
+            var inner = BuildHyperlinkInnerXml(node);
+            if (!string.IsNullOrWhiteSpace(inner))
+                sb.Append(builder.CreateHyperlinkXmlFromInnerXml(inner, href));
+            else
+                sb.Append(builder.CreateHyperlinkXml(href, href, new RunProperties { Underline = true, Color = "#0000ff" }));
+        }
+
+        void AddImageNode(HtmlNode node)
+        {
+            var src = node.GetAttribute("src");
+            if (!string.IsNullOrWhiteSpace(src))
+            {
+                var imageData = ProcessImage(src).GetAwaiter().GetResult();
+                if (imageData != null)
+                {
+                    StartParagraph();
+                    sb.Append(builder.CreateImageRunXml(imageData.Data, imageData.ContentType, imageData.Width, imageData.Height));
+                    return;
+                }
+            }
+
+            var alt = node.GetAttribute("alt");
+            var text = !string.IsNullOrWhiteSpace(alt)
+                ? alt
+                : (!string.IsNullOrWhiteSpace(src) ? src : "[image]");
+            AddRun(text, GetRunProperties(node));
+        }
+
+        void RenderChildrenAsInline(HtmlNode node)
+        {
+            foreach (var child in node.Children)
+                RenderNode(child);
+        }
+
+        string BuildRunXml(string text, RunProperties props)
+        {
+            var run = new StringBuilder();
+            run.Append("<w:r>");
+            run.Append("<w:rPr>");
+            if (props.Bold) run.Append("<w:b/>");
+            if (props.Italic) run.Append("<w:i/>");
+            if (props.Underline) run.Append("<w:u w:val=\"single\"/>");
+            if (!string.IsNullOrEmpty(props.Color))
+                run.Append($"<w:color w:val=\"{props.Color.TrimStart('#')}\"/>");
+            if (!string.IsNullOrEmpty(props.BackgroundColor))
+                run.Append($"<w:shd w:val=\"clear\" w:fill=\"{props.BackgroundColor.TrimStart('#')}\"/>");
+            if (props.FontSize > 0)
+                run.Append($"<w:sz w:val=\"{props.FontSize * 2}\"/>");
+            if (!string.IsNullOrEmpty(props.FontFamily))
+                run.Append($"<w:rFonts w:ascii=\"{EscapeXmlAttr(props.FontFamily)}\" w:hAnsi=\"{EscapeXmlAttr(props.FontFamily)}\"/>");
+            run.Append("</w:rPr>");
+            run.Append("<w:t xml:space=\"preserve\">");
+            run.Append(EscapeXmlText(text));
+            run.Append("</w:t>");
+            run.Append("</w:r>");
+            return run.ToString();
+        }
+
+        string BuildHyperlinkInnerXml(HtmlNode linkNode)
+        {
+            var inner = new StringBuilder();
+            const string brRun = "<w:r><w:br/></w:r>";
+
+            bool EndsWithBreak()
+            {
+                if (inner.Length < brRun.Length) return false;
+                return inner.ToString(inner.Length - brRun.Length, brRun.Length) == brRun;
+            }
+
+            void AppendBreakIfNeeded()
+            {
+                if (inner.Length == 0) return;
+                if (!EndsWithBreak()) inner.Append(brRun);
+            }
+
+            RunProperties ApplyHyperlinkDefaults(RunProperties props)
+            {
+                props.Underline = true;
+                if (string.IsNullOrEmpty(props.Color)) props.Color = "#0000ff";
+                return props;
+            }
+
+            void AppendHyperlinkTextRun(string text, HtmlNode styleSource)
+            {
+                if (string.IsNullOrEmpty(text)) return;
+                var props = ApplyHyperlinkDefaults(GetRunProperties(styleSource));
+                inner.Append(BuildRunXml(text, props));
+            }
+
+            void AppendHyperlinkDefaultTextRun(string text)
+            {
+                if (string.IsNullOrEmpty(text)) return;
+                inner.Append(BuildRunXml(text, new RunProperties { Underline = true, Color = "#0000ff" }));
+            }
+
+            string ToRoman(int value)
+            {
+                if (value <= 0) return value.ToString();
+                var map = new (int value, string symbol)[]
+                {
+                    (1000, "m"), (900, "cm"), (500, "d"), (400, "cd"),
+                    (100, "c"), (90, "xc"), (50, "l"), (40, "xl"),
+                    (10, "x"), (9, "ix"), (5, "v"), (4, "iv"), (1, "i")
+                };
+                var sbRoman = new StringBuilder();
+                int remaining = value;
+                foreach (var (n, s) in map)
+                {
+                    while (remaining >= n)
+                    {
+                        sbRoman.Append(s);
+                        remaining -= n;
+                    }
+                }
+                return sbRoman.ToString();
+            }
+
+            string GetOrderedMarker(int index, int depth)
+            {
+                int mode = depth % 3;
+                return mode switch
+                {
+                    1 => $"{(char)('a' + ((index - 1) % 26))}.",
+                    2 => $"{ToRoman(index)}.",
+                    _ => $"{index}."
+                };
+            }
+
+            string BuildAlignedListPrefix(string marker, int depth)
+            {
+                var indent = new string(' ', Math.Min(depth, 6) * 2);
+                var normalizedMarker = marker.Length >= 4 ? marker : marker.PadRight(4, ' ');
+                return indent + normalizedMarker;
+            }
+
+            RunProperties BuildListMarkerProps(HtmlNode liNode)
+            {
+                var props = ApplyHyperlinkDefaults(GetRunProperties(liNode));
+                bool useLinkColor;
+                bool underline;
+                switch (_options.HyperlinkListMarkerStyleStrategy)
+                {
+                    case HyperlinkListMarkerStyleStrategy.LinkColorAndUnderline:
+                        useLinkColor = true;
+                        underline = true;
+                        break;
+                    case HyperlinkListMarkerStyleStrategy.LinkColorNoUnderline:
+                        useLinkColor = true;
+                        underline = false;
+                        break;
+                    case HyperlinkListMarkerStyleStrategy.InheritColorAndUnderline:
+                        useLinkColor = false;
+                        underline = true;
+                        break;
+                    case HyperlinkListMarkerStyleStrategy.InheritColorNoUnderline:
+                        useLinkColor = false;
+                        underline = false;
+                        break;
+                    default:
+                        useLinkColor = _options.UseLinkColorForListMarkersInHyperlinks;
+                        underline = _options.UnderlineListMarkersInHyperlinks;
+                        break;
+                }
+
+                if (useLinkColor)
+                    props.Color = "#0000ff";
+                props.Underline = underline;
+                props.Bold = false;
+                props.Italic = false;
+                return props;
+            }
+
+            void AppendListItemInline(HtmlNode node)
+            {
+                switch (node.TagName)
+                {
+                    case "ul":
+                    case "ol":
+                        return;
+                    case "#text":
+                        AppendHyperlinkTextRun(node.Text, node);
+                        return;
+                    case "img":
+                        var src = node.GetAttribute("src");
+                        if (!string.IsNullOrWhiteSpace(src))
+                        {
+                            var imageData = ProcessImage(src).GetAwaiter().GetResult();
+                            if (imageData != null)
+                            {
+                                inner.Append(builder.CreateImageRunXml(imageData.Data, imageData.ContentType, imageData.Width, imageData.Height));
+                                return;
+                            }
+                        }
+                        var alt = node.GetAttribute("alt");
+                        if (!string.IsNullOrWhiteSpace(alt))
+                            AppendHyperlinkDefaultTextRun(alt);
+                        return;
+                    case "br":
+                        inner.Append(brRun);
+                        return;
+                    case "style":
+                    case "script":
+                    case "head":
+                        return;
+                    case "p":
+                    case "div":
+                    case "h1":
+                    case "h2":
+                    case "h3":
+                    case "h4":
+                    case "h5":
+                    case "h6":
+                        AppendBreakIfNeeded();
+                        foreach (var c in node.Children) AppendListItemInline(c);
+                        AppendBreakIfNeeded();
+                        return;
+                    default:
+                        foreach (var c in node.Children) AppendListItemInline(c);
+                        return;
+                }
+            }
+
+            void AppendListNode(HtmlNode listNode, int depth)
+            {
+                bool isOrdered = listNode.TagName == "ol";
+                int index = 1;
+                foreach (var li in listNode.Children.Where(c => c.TagName == "li"))
+                {
+                    AppendBreakIfNeeded();
+                    var marker = isOrdered ? GetOrderedMarker(index, depth) : "-";
+                    var prefix = BuildAlignedListPrefix(marker, depth);
+                    inner.Append(BuildRunXml(prefix, BuildListMarkerProps(li)));
+
+                    foreach (var child in li.Children.Where(c => c.TagName != "ul" && c.TagName != "ol"))
+                        AppendListItemInline(child);
+
+                    foreach (var nested in li.Children.Where(c => c.TagName == "ul" || c.TagName == "ol"))
+                        AppendListNode(nested, depth + 1);
+                    index++;
+                }
+            }
+
+            void AppendNode(HtmlNode n)
+            {
+                switch (n.TagName)
+                {
+                    case "#text":
+                        AppendHyperlinkTextRun(n.Text, n);
+                        return;
+                    case "img":
+                        var src = n.GetAttribute("src");
+                        if (!string.IsNullOrWhiteSpace(src))
+                        {
+                            var imageData = ProcessImage(src).GetAwaiter().GetResult();
+                            if (imageData != null)
+                            {
+                                inner.Append(builder.CreateImageRunXml(imageData.Data, imageData.ContentType, imageData.Width, imageData.Height));
+                                return;
+                            }
+                        }
+                        var alt = n.GetAttribute("alt");
+                        if (!string.IsNullOrWhiteSpace(alt))
+                            AppendHyperlinkDefaultTextRun(alt);
+                        return;
+                    case "br":
+                        inner.Append(brRun);
+                        return;
+                    case "style":
+                    case "script":
+                    case "head":
+                        return;
+                    case "p":
+                    case "div":
+                    case "h1":
+                    case "h2":
+                    case "h3":
+                    case "h4":
+                    case "h5":
+                    case "h6":
+                        AppendBreakIfNeeded();
+                        foreach (var c in n.Children) AppendNode(c);
+                        AppendBreakIfNeeded();
+                        return;
+                    case "table":
+                        AppendBreakIfNeeded();
+                        var t = ExtractText(n);
+                        if (!string.IsNullOrWhiteSpace(t))
+                            AppendHyperlinkDefaultTextRun(t);
+                        AppendBreakIfNeeded();
+                        return;
+                    case "ul":
+                    case "ol":
+                        AppendListNode(n, 0);
+                        AppendBreakIfNeeded();
+                        return;
+                    default:
+                        foreach (var c in n.Children) AppendNode(c);
+                        return;
+                }
+            }
+
+            foreach (var c in linkNode.Children) AppendNode(c);
+            if (inner.Length == 0)
+            {
+                var fallbackText = ExtractText(linkNode);
+                if (!string.IsNullOrWhiteSpace(fallbackText))
+                    AppendHyperlinkDefaultTextRun(fallbackText);
+            }
+            return inner.ToString();
+        }
+
+        void RenderBlock(HtmlNode node)
+        {
+            EndParagraph();
+            StartParagraph(node);
+            foreach (var child in node.Children)
+                RenderNode(child);
+            EndParagraph();
+        }
+
+        void StartListParagraph(int numId, int level)
+        {
+            if (paragraphOpen) EndParagraph();
+            sb.Append("<w:p><w:pPr><w:pStyle w:val=\"ListParagraph\"/>");
+            sb.Append("<w:numPr>");
+            sb.Append($"<w:ilvl w:val=\"{level}\"/>");
+            sb.Append($"<w:numId w:val=\"{numId}\"/>");
+            sb.Append("</w:numPr>");
+            sb.Append("</w:pPr>");
+            paragraphOpen = true;
+            wroteContent = true;
+        }
+
+        void RenderListNode(HtmlNode listNode, int level)
+        {
+            int boundedLevel = Math.Min(level, MaxNumberingLevel);
+            int numId = listNode.TagName == "ol" ? 2 : 1;
+
+            foreach (var li in listNode.Children.Where(c => c.TagName == "li"))
+            {
+                StartListParagraph(numId, boundedLevel);
+                bool hadInlineContent = false;
+
+                foreach (var child in li.Children)
+                {
+                    if (child.TagName == "ul" || child.TagName == "ol")
+                        continue;
+
+                    int beforeLen = sb.Length;
+                    if (child.TagName == "p" || child.TagName == "div" ||
+                        child.TagName == "h1" || child.TagName == "h2" || child.TagName == "h3" ||
+                        child.TagName == "h4" || child.TagName == "h5" || child.TagName == "h6")
+                    {
+                        var t = ExtractText(child);
+                        AddRun(t, GetRunProperties(child));
+                    }
+                    else
+                    {
+                        RenderNode(child);
+                    }
+                    if (sb.Length > beforeLen) hadInlineContent = true;
+                }
+
+                if (!hadInlineContent)
+                {
+                    var fallback = ExtractText(li);
+                    if (!string.IsNullOrWhiteSpace(fallback))
+                        AddRun(fallback, GetRunProperties(li));
+                }
+
+                EndParagraph();
+
+                foreach (var nested in li.Children.Where(c => c.TagName == "ul" || c.TagName == "ol"))
+                    RenderListNode(nested, boundedLevel + 1);
+            }
+        }
+
+        void RenderNode(HtmlNode node)
+        {
+            switch (node.TagName)
+            {
+                case "#text":
+                    AddRun(node.Text, GetRunProperties(node));
+                    return;
+                case "br":
+                    StartParagraph();
+                    sb.Append("<w:r><w:br/></w:r>");
+                    return;
+                case "p":
+                case "div":
+                case "h1":
+                case "h2":
+                case "h3":
+                case "h4":
+                case "h5":
+                case "h6":
+                    RenderBlock(node);
+                    return;
+                case "ul":
+                case "ol":
+                    RenderListNode(node, 0);
+                    return;
+                case "table":
+                    EndParagraph();
+                    var nested = BuildTableData(node, builder);
+                    if (nested.Rows.Count > 0)
+                    {
+                        sb.Append(builder.CreateTableXml(nested));
+                        wroteContent = true;
+                    }
+                    else
+                    {
+                        AddRun(ExtractText(node), GetRunProperties(node));
+                    }
+                    return;
+                case "a":
+                    AddHyperlinkNode(node);
+                    return;
+                case "img":
+                    AddImageNode(node);
+                    return;
+                case "style":
+                case "script":
+                case "head":
+                    return;
+                default:
+                    RenderChildrenAsInline(node);
+                    return;
+            }
+        }
+
+        foreach (var child in cellNode.Children)
+            RenderNode(child);
+
+        EndParagraph();
+        if (!wroteContent)
+            return "<w:p/>";
+
+        return sb.ToString();
+    }
+
+    private static string EscapeXmlText(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return string.Empty;
+        return text.Replace("&", "&amp;")
+                   .Replace("<", "&lt;")
+                   .Replace(">", "&gt;");
+    }
+
+    private static string EscapeXmlAttr(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return string.Empty;
+        return EscapeXmlText(text)
+            .Replace("\"", "&quot;")
+            .Replace("'", "&apos;");
     }
 
     private static (int before, int after) GetMarginSpacing(HtmlNode node)

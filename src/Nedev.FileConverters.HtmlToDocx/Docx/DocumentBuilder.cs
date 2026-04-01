@@ -117,13 +117,48 @@ public sealed class DocumentBuilder
     public void AddHyperlink(string text, string url, RunProperties? props = null)
     {
         if (!_inParagraph) StartParagraph();
+        _currentXml.Append(CreateHyperlinkXml(text, url, props));
+    }
 
+    public string CreateHyperlinkXml(string text, string url, RunProperties? props = null)
+    {
+        var relId = $"rId{++_relCount}";
+        _relationships.Add((relId, url, "hyperlink"));
+        var style = props ?? new RunProperties { Color = "0000FF", Underline = true };
+
+        var xml = new StringBuilder();
+        xml.Append($"<w:hyperlink r:id=\"{relId}\">");
+        xml.Append("<w:r>");
+        xml.Append("<w:rPr>");
+        if (style.Bold) xml.Append("<w:b/>");
+        if (style.Italic) xml.Append("<w:i/>");
+        if (style.Underline) xml.Append("<w:u w:val=\"single\"/>");
+        if (!string.IsNullOrEmpty(style.Color))
+            xml.Append($"<w:color w:val=\"{style.Color.TrimStart('#')}\"/>");
+        if (!string.IsNullOrEmpty(style.BackgroundColor))
+            xml.Append($"<w:shd w:val=\"clear\" w:fill=\"{style.BackgroundColor.TrimStart('#')}\"/>");
+        if (style.FontSize > 0)
+            xml.Append($"<w:sz w:val=\"{style.FontSize * 2}\"/>");
+        if (!string.IsNullOrEmpty(style.FontFamily))
+            xml.Append($"<w:rFonts w:ascii=\"{EscapeXml(style.FontFamily)}\" w:hAnsi=\"{EscapeXml(style.FontFamily)}\"/>");
+        xml.Append("</w:rPr>");
+        xml.Append("<w:t xml:space=\"preserve\">");
+        xml.Append(EscapeXml(text));
+        xml.Append("</w:t></w:r>");
+        xml.Append("</w:hyperlink>");
+        return xml.ToString();
+    }
+
+    public string CreateHyperlinkXmlFromInnerXml(string innerXml, string url)
+    {
         var relId = $"rId{++_relCount}";
         _relationships.Add((relId, url, "hyperlink"));
 
-        _currentXml.Append($"<w:hyperlink r:id=\"{relId}\">");
-        AddRun(text, props ?? new RunProperties { Color = "0000FF", Underline = true });
-        _currentXml.Append("</w:hyperlink>");
+        var xml = new StringBuilder();
+        xml.Append($"<w:hyperlink r:id=\"{relId}\">");
+        xml.Append(innerXml);
+        xml.Append("</w:hyperlink>");
+        return xml.ToString();
     }
 
     public void AddBreak()
@@ -135,36 +170,41 @@ public sealed class DocumentBuilder
     public void AddImage(byte[] data, string contentType, int widthPx = 300, int heightPx = 200)
     {
         if (!_inParagraph) StartParagraph();
+        _currentXml.Append(CreateImageRunXml(data, contentType, widthPx, heightPx));
+    }
 
+    public string CreateImageRunXml(byte[] data, string contentType, int widthPx = 300, int heightPx = 200)
+    {
         var ext = contentType.Split('/').Last();
         if (ext == "jpeg") ext = "jpg";
         var fileName = $"image{++_mediaCount}.{ext}";
         var relId = $"rId{++_relCount}";
-        
+
         _media.Add((fileName, data));
         _relationships.Add((relId, $"media/{fileName}", "image"));
 
-        // EMUs (English Metric Units): 1 px ~= 9525 EMUs (at 96 DPI)
         long widthEmu = (long)widthPx * 9525;
         long heightEmu = (long)heightPx * 9525;
 
-        _currentXml.Append("<w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\">");
-        _currentXml.Append($"<wp:extent cx=\"{widthEmu}\" cy=\"{heightEmu}\"/>");
-        _currentXml.Append("<wp:docPr id=\"1\" name=\"Image\"/>");
-        _currentXml.Append("<wp:cNvGraphicFramePr><a:graphicFrameLocks xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" noChangeAspect=\"1\"/></wp:cNvGraphicFramePr>");
-        _currentXml.Append("<a:graphic xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\">");
-        _currentXml.Append("<a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">");
-        _currentXml.Append("<pic:pic xmlns:pic=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">");
-        _currentXml.Append("<pic:nvPicPr><pic:cNvPr id=\"0\" name=\"Picture\"/><pic:cNvPicPr/></pic:nvPicPr>");
-        _currentXml.Append("<pic:blipFill>");
-        _currentXml.Append($"<a:blip r:embed=\"{relId}\"/>");
-        _currentXml.Append("<a:stretch><a:fillRect/></a:stretch>");
-        _currentXml.Append("</pic:blipFill>");
-        _currentXml.Append("<pic:spPr>");
-        _currentXml.Append("<a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"" + widthEmu + "\" cy=\"" + heightEmu + "\"/></a:xfrm>");
-        _currentXml.Append("<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom>");
-        _currentXml.Append("</pic:spPr>");
-        _currentXml.Append("</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>");
+        var xml = new StringBuilder();
+        xml.Append("<w:r><w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\">");
+        xml.Append($"<wp:extent cx=\"{widthEmu}\" cy=\"{heightEmu}\"/>");
+        xml.Append("<wp:docPr id=\"1\" name=\"Image\"/>");
+        xml.Append("<wp:cNvGraphicFramePr><a:graphicFrameLocks xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" noChangeAspect=\"1\"/></wp:cNvGraphicFramePr>");
+        xml.Append("<a:graphic xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\">");
+        xml.Append("<a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">");
+        xml.Append("<pic:pic xmlns:pic=\"http://schemas.openxmlformats.org/drawingml/2006/picture\">");
+        xml.Append("<pic:nvPicPr><pic:cNvPr id=\"0\" name=\"Picture\"/><pic:cNvPicPr/></pic:nvPicPr>");
+        xml.Append("<pic:blipFill>");
+        xml.Append($"<a:blip r:embed=\"{relId}\"/>");
+        xml.Append("<a:stretch><a:fillRect/></a:stretch>");
+        xml.Append("</pic:blipFill>");
+        xml.Append("<pic:spPr>");
+        xml.Append("<a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"" + widthEmu + "\" cy=\"" + heightEmu + "\"/></a:xfrm>");
+        xml.Append("<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom>");
+        xml.Append("</pic:spPr>");
+        xml.Append("</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r>");
+        return xml.ToString();
     }
 
     public void AddHeading(string text, int level)
@@ -177,54 +217,58 @@ public sealed class DocumentBuilder
     public void AddTable(TableData table)
     {
         if (_inParagraph) EndParagraph();
+        _currentXml.Append(CreateTableXml(table));
+    }
 
-        _currentXml.Append("<w:tbl>");
-        _currentXml.Append("<w:tblPr><w:tblW w:w=\"0\" w:type=\"auto\"/><w:tblBorders>");
-        _currentXml.Append("<w:top w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/>");
-        _currentXml.Append("<w:left w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/>");
-        _currentXml.Append("<w:bottom w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/>");
-        _currentXml.Append("<w:right w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/>");
-        _currentXml.Append("<w:insideH w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/>");
-        _currentXml.Append("<w:insideV w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/>");
-        _currentXml.Append("</w:tblBorders></w:tblPr>");
+    public string CreateTableXml(TableData table)
+    {
+        var xml = new StringBuilder();
+        xml.Append("<w:tbl>");
+        xml.Append("<w:tblPr><w:tblW w:w=\"0\" w:type=\"auto\"/><w:tblBorders>");
+        xml.Append("<w:top w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/>");
+        xml.Append("<w:left w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/>");
+        xml.Append("<w:bottom w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/>");
+        xml.Append("<w:right w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/>");
+        xml.Append("<w:insideH w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/>");
+        xml.Append("<w:insideV w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/>");
+        xml.Append("</w:tblBorders></w:tblPr>");
 
         foreach (var row in table.Rows)
         {
-            _currentXml.Append("<w:tr>");
+            xml.Append("<w:tr>");
             foreach (var cell in row.Cells)
             {
-                _currentXml.Append("<w:tc>");
-                _currentXml.Append("<w:tcPr>");
+                xml.Append("<w:tc>");
+                xml.Append("<w:tcPr>");
                 if (cell.ColSpan > 1)
-                    _currentXml.Append($"<w:gridSpan w:val=\"{cell.ColSpan}\"/>");
+                    xml.Append($"<w:gridSpan w:val=\"{cell.ColSpan}\"/>");
                 if (cell.RowMerge == RowMergeType.Restart)
-                    _currentXml.Append("<w:vMerge w:val=\"restart\"/>");
+                    xml.Append("<w:vMerge w:val=\"restart\"/>");
                 else if (cell.RowMerge == RowMergeType.Continue)
-                    _currentXml.Append("<w:vMerge/>");
-                // background shading
+                    xml.Append("<w:vMerge/>");
                 if (!string.IsNullOrEmpty(cell.BackgroundColor))
-                    _currentXml.Append($"<w:shd w:val=\"clear\" w:fill=\"{cell.BackgroundColor.TrimStart('#')}\"/>");
-                // cell padding (margins)
+                    xml.Append($"<w:shd w:val=\"clear\" w:fill=\"{cell.BackgroundColor.TrimStart('#')}\"/>");
                 if (cell.PaddingLeft > 0 || cell.PaddingRight > 0 || cell.PaddingTop > 0 || cell.PaddingBottom > 0)
                 {
-                    _currentXml.Append("<w:tcMar");
-                    if (cell.PaddingTop > 0) _currentXml.Append($" w:top=\"{cell.PaddingTop}\"");
-                    if (cell.PaddingRight > 0) _currentXml.Append($" w:right=\"{cell.PaddingRight}\"");
-                    if (cell.PaddingBottom > 0) _currentXml.Append($" w:bottom=\"{cell.PaddingBottom}\"");
-                    if (cell.PaddingLeft > 0) _currentXml.Append($" w:left=\"{cell.PaddingLeft}\"");
-                    _currentXml.Append("/>");
+                    xml.Append("<w:tcMar");
+                    if (cell.PaddingTop > 0) xml.Append($" w:top=\"{cell.PaddingTop}\"");
+                    if (cell.PaddingRight > 0) xml.Append($" w:right=\"{cell.PaddingRight}\"");
+                    if (cell.PaddingBottom > 0) xml.Append($" w:bottom=\"{cell.PaddingBottom}\"");
+                    if (cell.PaddingLeft > 0) xml.Append($" w:left=\"{cell.PaddingLeft}\"");
+                    xml.Append("/>");
                 }
-                _currentXml.Append("</w:tcPr>");
+                xml.Append("</w:tcPr>");
 
-                // For now, tables contain simple text paragraphs
-                _currentXml.Append("<w:p><w:r><w:t xml:space=\"preserve\">");
-                _currentXml.Append(EscapeXml(cell.Text));
-                _currentXml.Append("</w:t></w:r></w:p>");
-                _currentXml.Append("</w:tc>");
+                if (!string.IsNullOrEmpty(cell.ContentXml))
+                    xml.Append(cell.ContentXml);
+                else
+                    xml.Append("<w:p><w:r><w:t xml:space=\"preserve\">" + EscapeXml(cell.Text) + "</w:t></w:r></w:p>");
+                xml.Append("</w:tc>");
             }
-            _currentXml.Append("</w:tr>");
+            xml.Append("</w:tr>");
         }
-        _currentXml.Append("</w:tbl>");
+        xml.Append("</w:tbl>");
+        return xml.ToString();
     }
 
     public void AddPageNumberField()

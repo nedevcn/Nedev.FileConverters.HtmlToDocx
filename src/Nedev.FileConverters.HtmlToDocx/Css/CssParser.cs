@@ -10,8 +10,22 @@ public sealed class CssParser
         var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         if (string.IsNullOrWhiteSpace(style)) return result;
 
+        var declarations = ParseDeclarations(style);
+        foreach (var declaration in declarations)
+            result[declaration.Property] = declaration.Value;
+
+        return result;
+    }
+
+    public static List<CssDeclaration> ParseDeclarations(string? style)
+    {
+        var declarations = new List<CssDeclaration>();
+        if (string.IsNullOrWhiteSpace(style)) return declarations;
+
         var span = style.AsSpan();
         int start = 0;
+        int sourceOrder = 0;
+
         while (start < span.Length)
         {
             int colonIndex = span.Slice(start).IndexOf(':');
@@ -20,7 +34,7 @@ public sealed class CssParser
             var name = span.Slice(start, colonIndex).Trim().ToString().ToLowerInvariant();
             int valueStart = start + colonIndex + 1;
             int semicolonIndex = span.Slice(valueStart).IndexOf(';');
-            
+
             string value;
             if (semicolonIndex == -1)
             {
@@ -33,13 +47,13 @@ public sealed class CssParser
                 start = valueStart + semicolonIndex + 1;
             }
 
-            if (!string.IsNullOrEmpty(name))
-            {
-                result[name] = value;
-            }
+            if (string.IsNullOrEmpty(name)) continue;
+
+            var important = TryStripImportant(ref value);
+            declarations.Add(new CssDeclaration(name, value, important, sourceOrder++));
         }
 
-        return result;
+        return declarations;
     }
 
     public static List<CssRule> ParseStylesheet(string css)
@@ -75,7 +89,7 @@ public sealed class CssParser
             var selectors = rawSelector.Split(',', StringSplitOptions.RemoveEmptyEntries);
             foreach (var sel in selectors)
             {
-                rules.Add(new CssRule(sel.Trim(), ParseInlineStyle(body)));
+                rules.Add(new CssRule(sel.Trim(), ParseDeclarations(body)));
             }
 
             pos += braceOpen + braceClose + 1;
@@ -83,16 +97,46 @@ public sealed class CssParser
 
         return rules;
     }
+
+    private static bool TryStripImportant(ref string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return false;
+
+        int marker = value.LastIndexOf('!');
+        if (marker < 0) return false;
+
+        var suffix = value.Substring(marker).Trim();
+        if (!suffix.Equals("!important", StringComparison.OrdinalIgnoreCase)) return false;
+
+        value = value.Substring(0, marker).TrimEnd();
+        return true;
+    }
 }
 
 public sealed class CssRule
 {
     public string Selector { get; }
-    public Dictionary<string, string> Declarations { get; }
+    public List<CssDeclaration> Declarations { get; }
 
-    public CssRule(string selector, Dictionary<string, string> declarations)
+    public CssRule(string selector, List<CssDeclaration> declarations)
     {
         Selector = selector;
         Declarations = declarations;
+    }
+}
+
+public sealed class CssDeclaration
+{
+    public string Property { get; }
+    public string Value { get; }
+    public bool Important { get; }
+    public int SourceOrder { get; }
+
+    public CssDeclaration(string property, string value, bool important, int sourceOrder)
+    {
+        Property = property;
+        Value = value;
+        Important = important;
+        SourceOrder = sourceOrder;
     }
 }

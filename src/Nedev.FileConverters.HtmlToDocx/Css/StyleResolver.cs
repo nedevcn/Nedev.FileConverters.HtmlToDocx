@@ -26,36 +26,47 @@ public sealed class StyleResolver
     private static void ResolveNodeStyle(HtmlNode node, List<CssRule> stylesheet, Dictionary<string, string> parentStyle)
     {
         var computed = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var priority = new Dictionary<string, StylePriority>(StringComparer.OrdinalIgnoreCase);
 
-        // 1. Inheritance
         foreach (var kvp in parentStyle)
         {
             if (InheritableProperties.Contains(kvp.Key))
             {
                 computed[kvp.Key] = kvp.Value;
+                priority[kvp.Key] = new StylePriority(important: false, specificity: 0, sourceOrder: -1);
             }
         }
 
-        // 2. Stylesheet Rules (Simplified matching)
+        int sourceOrder = 0;
         foreach (var rule in stylesheet)
         {
             if (MatchesSelector(node, rule.Selector))
             {
+                int specificity = CalculateSelectorSpecificity(rule.Selector);
                 foreach (var decl in rule.Declarations)
                 {
-                    computed[decl.Key] = decl.Value;
+                    int declarationOrder = unchecked(sourceOrder * 1000 + decl.SourceOrder);
+                    ApplyDeclaration(computed, priority, decl.Property, decl.Value, decl.Important, specificity, declarationOrder);
                 }
             }
+            sourceOrder++;
         }
 
-        // 3. Inline Styles (Highest priority)
         var inlineStyleAttr = node.GetAttribute("style");
         if (!string.IsNullOrEmpty(inlineStyleAttr))
         {
-            var inlineDecls = CssParser.ParseInlineStyle(inlineStyleAttr);
+            var inlineDecls = CssParser.ParseDeclarations(inlineStyleAttr);
             foreach (var decl in inlineDecls)
             {
-                computed[decl.Key] = decl.Value;
+                ApplyDeclaration(
+                    computed,
+                    priority,
+                    decl.Property,
+                    decl.Value,
+                    decl.Important,
+                    specificity: 1000,
+                    sourceOrder: int.MaxValue - inlineDecls.Count + decl.SourceOrder
+                );
             }
         }
 
@@ -64,6 +75,103 @@ public sealed class StyleResolver
         foreach (var child in node.Children)
         {
             ResolveNodeStyle(child, stylesheet, computed);
+        }
+    }
+
+    private static void ApplyDeclaration(
+        Dictionary<string, string> computed,
+        Dictionary<string, StylePriority> priority,
+        string property,
+        string value,
+        bool important,
+        int specificity,
+        int sourceOrder)
+    {
+        var incoming = new StylePriority(important, specificity, sourceOrder);
+        if (!priority.TryGetValue(property, out var existing) || incoming.CompareTo(existing) >= 0)
+        {
+            computed[property] = value;
+            priority[property] = incoming;
+        }
+    }
+
+    private static int CalculateSelectorSpecificity(string selector)
+    {
+        int idCount = 0;
+        int classLikeCount = 0;
+        int typeCount = 0;
+        var tokens = TokenizeSelector(selector);
+
+        foreach (var token in tokens)
+        {
+            if (Combinators.Contains(token)) continue;
+            if (token == "*") continue;
+
+            int i = 0;
+            bool hasType = false;
+            while (i < token.Length)
+            {
+                char c = token[i];
+                if (c == '#')
+                {
+                    idCount++;
+                    i++;
+                    while (i < token.Length && token[i] != '.' && token[i] != '#' && token[i] != '[' && token[i] != ':') i++;
+                }
+                else if (c == '.')
+                {
+                    classLikeCount++;
+                    i++;
+                    while (i < token.Length && token[i] != '.' && token[i] != '#' && token[i] != '[' && token[i] != ':') i++;
+                }
+                else if (c == '[')
+                {
+                    classLikeCount++;
+                    i++;
+                    while (i < token.Length && token[i] != ']') i++;
+                    if (i < token.Length) i++;
+                }
+                else if (c == ':')
+                {
+                    classLikeCount++;
+                    i++;
+                    if (i < token.Length && token[i] == ':') i++;
+                    while (i < token.Length && token[i] != '.' && token[i] != '#' && token[i] != '[' && token[i] != ':') i++;
+                }
+                else
+                {
+                    int start = i;
+                    while (i < token.Length && token[i] != '.' && token[i] != '#' && token[i] != '[' && token[i] != ':') i++;
+                    var type = token.Substring(start, i - start).Trim();
+                    if (!string.IsNullOrEmpty(type) && type != "*")
+                        hasType = true;
+                }
+            }
+
+            if (hasType) typeCount++;
+        }
+
+        return idCount * 100 + classLikeCount * 10 + typeCount;
+    }
+
+    private readonly struct StylePriority : IComparable<StylePriority>
+    {
+        public bool Important { get; }
+        public int Specificity { get; }
+        public int SourceOrder { get; }
+
+        public StylePriority(bool important, int specificity, int sourceOrder)
+        {
+            Important = important;
+            Specificity = specificity;
+            SourceOrder = sourceOrder;
+        }
+
+        public int CompareTo(StylePriority other)
+        {
+            if (Important != other.Important) return Important ? 1 : -1;
+            if (Specificity != other.Specificity) return Specificity.CompareTo(other.Specificity);
+            return SourceOrder.CompareTo(other.SourceOrder);
         }
     }
 

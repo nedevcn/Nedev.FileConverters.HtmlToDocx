@@ -13,11 +13,23 @@ public class ConverterOptions
     // Advanced Features
     public bool EnablePageNumbering { get; set; } = true;
     public int TOCLevels { get; set; } = 3;
+    public HyperlinkListMarkerStyleStrategy HyperlinkListMarkerStyleStrategy { get; set; } = HyperlinkListMarkerStyleStrategy.LegacyBooleans;
+    public bool UseLinkColorForListMarkersInHyperlinks { get; set; } = true;
+    public bool UnderlineListMarkersInHyperlinks { get; set; } = true;
 
     // Page Layout (values in twips, 1 inch = 1440)
     public int PageWidth { get; set; } = 11906; // A4
     public int PageHeight { get; set; } = 16838; // A4
     public PageMargins Margins { get; set; } = new();
+}
+
+public enum HyperlinkListMarkerStyleStrategy
+{
+    LegacyBooleans = 0,
+    LinkColorAndUnderline = 1,
+    LinkColorNoUnderline = 2,
+    InheritColorAndUnderline = 3,
+    InheritColorNoUnderline = 4
 }
 
 public class PageMargins
@@ -52,6 +64,7 @@ public sealed class TableRow
 public sealed class TableCell
 {
     public string Text { get; set; } = string.Empty;
+    public string? ContentXml { get; set; }
     public int ColSpan { get; set; } = 1;
     public RowMergeType RowMerge { get; set; } = RowMergeType.None;
     public string? BackgroundColor { get; set; }

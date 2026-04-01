@@ -108,11 +108,68 @@ namespace Nedev.FileConverters.HtmlToDocx.Tests
             Assert.True(InvokeMatches(grand, "div span"));
         }
 
+        [Fact]
+        public void ParseDeclarations_ReadsImportantFlag()
+        {
+            var declarations = CssParser.ParseDeclarations("color: red !important; font-size: 12pt;");
+            Assert.Equal(2, declarations.Count);
+            Assert.True(declarations[0].Important);
+            Assert.Equal("red", declarations[0].Value);
+            Assert.False(declarations[1].Important);
+        }
+
+        [Fact]
+        public void ResolveStyles_UsesSpecificity()
+        {
+            var doc = HtmlDocument.Parse("<style>p{color:blue;} #x{color:red;}</style><p id=\"x\">t</p>");
+            StyleResolver.ResolveStyles(doc);
+            var node = FindFirstElementByTag(doc.Root, "p");
+            Assert.NotNull(node);
+            Assert.True(node!.ComputedStyle.TryGetValue("color", out var color));
+            Assert.Equal("red", color);
+        }
+
+        [Fact]
+        public void ResolveStyles_ImportantBeatsInlineNonImportant()
+        {
+            var doc = HtmlDocument.Parse("<style>#x{color:red;} p{color:blue !important;}</style><p id=\"x\" style=\"color:green\">t</p>");
+            StyleResolver.ResolveStyles(doc);
+            var node = FindFirstElementByTag(doc.Root, "p");
+            Assert.NotNull(node);
+            Assert.True(node!.ComputedStyle.TryGetValue("color", out var color));
+            Assert.Equal("blue", color);
+        }
+
+        [Fact]
+        public void ResolveStyles_InlineImportantBeatsStylesheetImportant()
+        {
+            var doc = HtmlDocument.Parse("<style>#x{color:red !important;}</style><p id=\"x\" style=\"color:green !important\">t</p>");
+            StyleResolver.ResolveStyles(doc);
+            var node = FindFirstElementByTag(doc.Root, "p");
+            Assert.NotNull(node);
+            Assert.True(node!.ComputedStyle.TryGetValue("color", out var color));
+            Assert.Equal("green", color);
+        }
+
         private bool InvokeMatches(HtmlNode node, string selector)
         {
             // Use reflection to call the internal method
             var method = typeof(StyleResolver).GetMethod("MatchesSelector", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
             return (bool)method!.Invoke(null, new object[] { node, selector });
+        }
+
+        private static HtmlNode? FindFirstElementByTag(HtmlNode node, string tagName)
+        {
+            if (node.TagName.Equals(tagName, StringComparison.OrdinalIgnoreCase))
+                return node;
+
+            foreach (var child in node.Children)
+            {
+                var found = FindFirstElementByTag(child, tagName);
+                if (found != null) return found;
+            }
+
+            return null;
         }
     }
 }
