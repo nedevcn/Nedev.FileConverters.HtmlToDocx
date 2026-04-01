@@ -86,7 +86,7 @@ public sealed class CssParser
             var body = span.Slice(pos + braceOpen + 1, braceClose - 1).ToString();
 
             // break selectors by comma and create a rule per selector
-            var selectors = rawSelector.Split(',', StringSplitOptions.RemoveEmptyEntries);
+            var selectors = SplitSelectors(rawSelector);
             foreach (var sel in selectors)
             {
                 rules.Add(new CssRule(sel.Trim(), ParseDeclarations(body)));
@@ -110,6 +110,49 @@ public sealed class CssParser
 
         value = value.Substring(0, marker).TrimEnd();
         return true;
+    }
+
+    private static List<string> SplitSelectors(string rawSelector)
+    {
+        var selectors = new List<string>();
+        if (string.IsNullOrWhiteSpace(rawSelector)) return selectors;
+
+        int start = 0;
+        int bracketDepth = 0;
+        int parenDepth = 0;
+        char quote = '\0';
+
+        for (int i = 0; i < rawSelector.Length; i++)
+        {
+            char c = rawSelector[i];
+            if (quote != '\0')
+            {
+                if (c == quote) quote = '\0';
+                continue;
+            }
+
+            if (c == '"' || c == '\'')
+            {
+                quote = c;
+                continue;
+            }
+
+            if (c == '[') { bracketDepth++; continue; }
+            if (c == ']') { if (bracketDepth > 0) bracketDepth--; continue; }
+            if (c == '(') { parenDepth++; continue; }
+            if (c == ')') { if (parenDepth > 0) parenDepth--; continue; }
+
+            if (c == ',' && bracketDepth == 0 && parenDepth == 0)
+            {
+                var part = rawSelector.Substring(start, i - start).Trim();
+                if (!string.IsNullOrEmpty(part)) selectors.Add(part);
+                start = i + 1;
+            }
+        }
+
+        var last = rawSelector.Substring(start).Trim();
+        if (!string.IsNullOrEmpty(last)) selectors.Add(last);
+        return selectors;
     }
 }
 

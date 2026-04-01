@@ -106,52 +106,157 @@ public sealed class StyleResolver
         {
             if (Combinators.Contains(token)) continue;
             if (token == "*") continue;
-
-            int i = 0;
-            bool hasType = false;
-            while (i < token.Length)
-            {
-                char c = token[i];
-                if (c == '#')
-                {
-                    idCount++;
-                    i++;
-                    while (i < token.Length && token[i] != '.' && token[i] != '#' && token[i] != '[' && token[i] != ':') i++;
-                }
-                else if (c == '.')
-                {
-                    classLikeCount++;
-                    i++;
-                    while (i < token.Length && token[i] != '.' && token[i] != '#' && token[i] != '[' && token[i] != ':') i++;
-                }
-                else if (c == '[')
-                {
-                    classLikeCount++;
-                    i++;
-                    while (i < token.Length && token[i] != ']') i++;
-                    if (i < token.Length) i++;
-                }
-                else if (c == ':')
-                {
-                    classLikeCount++;
-                    i++;
-                    if (i < token.Length && token[i] == ':') i++;
-                    while (i < token.Length && token[i] != '.' && token[i] != '#' && token[i] != '[' && token[i] != ':') i++;
-                }
-                else
-                {
-                    int start = i;
-                    while (i < token.Length && token[i] != '.' && token[i] != '#' && token[i] != '[' && token[i] != ':') i++;
-                    var type = token.Substring(start, i - start).Trim();
-                    if (!string.IsNullOrEmpty(type) && type != "*")
-                        hasType = true;
-                }
-            }
-
-            if (hasType) typeCount++;
+            var (a, b, c) = CalculateSimpleSpecificity(token);
+            idCount += a;
+            classLikeCount += b;
+            typeCount += c;
         }
 
         return idCount * 100 + classLikeCount * 10 + typeCount;
+    }
+
+    private static (int id, int classLike, int type) CalculateSimpleSpecificity(string simple)
+    {
+        int idCount = 0;
+        int classLikeCount = 0;
+        int typeCount = 0;
+        int i = 0;
+        bool hasType = false;
+
+        while (i < simple.Length)
+        {
+            char c = simple[i];
+            if (c == '#')
+            {
+                idCount++;
+                i++;
+                while (i < simple.Length && simple[i] != '.' && simple[i] != '#' && simple[i] != '[' && simple[i] != ':') i++;
+            }
+            else if (c == '.')
+            {
+                classLikeCount++;
+                i++;
+                while (i < simple.Length && simple[i] != '.' && simple[i] != '#' && simple[i] != '[' && simple[i] != ':') i++;
+            }
+            else if (c == '[')
+            {
+                classLikeCount++;
+                i++;
+                while (i < simple.Length && simple[i] != ']') i++;
+                if (i < simple.Length) i++;
+            }
+            else if (c == ':')
+            {
+                i++;
+                bool pseudoElement = i < simple.Length && simple[i] == ':';
+                if (pseudoElement)
+                {
+                    typeCount++;
+                    i++;
+                }
+
+                int nameStart = i;
+                while (i < simple.Length && (char.IsLetterOrDigit(simple[i]) || simple[i] == '-' || simple[i] == '_')) i++;
+                var pseudoName = simple.Substring(nameStart, i - nameStart);
+
+                if (!pseudoElement && pseudoName.Equals("not", StringComparison.OrdinalIgnoreCase) && i < simple.Length && simple[i] == '(')
+                {
+                    if (TryReadFunctionArgument(simple, ref i, out var arg))
+                    {
+                        int maxA = 0, maxB = 0, maxC = 0;
+                        foreach (var part in SplitSelectorList(arg))
+                        {
+                            var trimmed = part.Trim();
+                            if (string.IsNullOrEmpty(trimmed)) continue;
+                            var specificity = CalculateSelectorSpecificity(trimmed);
+                            int a = specificity / 100;
+                            int b = (specificity % 100) / 10;
+                            int c2 = specificity % 10;
+                            if (a > maxA || (a == maxA && b > maxB) || (a == maxA && b == maxB && c2 > maxC))
+                            {
+                                maxA = a;
+                                maxB = b;
+                                maxC = c2;
+                            }
+                        }
+                        idCount += maxA;
+                        classLikeCount += maxB;
+                        typeCount += maxC;
+                    }
+                }
+                else if (!pseudoElement && pseudoName.Equals("is", StringComparison.OrdinalIgnoreCase) && i < simple.Length && simple[i] == '(')
+                {
+                    if (TryReadFunctionArgument(simple, ref i, out var arg))
+                    {
+                        int maxA = 0, maxB = 0, maxC = 0;
+                        foreach (var part in SplitSelectorList(arg))
+                        {
+                            var trimmed = part.Trim();
+                            if (string.IsNullOrEmpty(trimmed)) continue;
+                            var specificity = CalculateSelectorSpecificity(trimmed);
+                            int a = specificity / 100;
+                            int b = (specificity % 100) / 10;
+                            int c2 = specificity % 10;
+                            if (a > maxA || (a == maxA && b > maxB) || (a == maxA && b == maxB && c2 > maxC))
+                            {
+                                maxA = a;
+                                maxB = b;
+                                maxC = c2;
+                            }
+                        }
+                        idCount += maxA;
+                        classLikeCount += maxB;
+                        typeCount += maxC;
+                    }
+                }
+                else if (!pseudoElement && pseudoName.Equals("has", StringComparison.OrdinalIgnoreCase) && i < simple.Length && simple[i] == '(')
+                {
+                    if (TryReadFunctionArgument(simple, ref i, out var arg))
+                    {
+                        int maxA = 0, maxB = 0, maxC = 0;
+                        foreach (var part in SplitSelectorList(arg))
+                        {
+                            var trimmed = part.Trim();
+                            if (string.IsNullOrEmpty(trimmed)) continue;
+                            var specificity = CalculateSelectorSpecificity(trimmed.TrimStart('>', '+', '~').Trim());
+                            int a = specificity / 100;
+                            int b = (specificity % 100) / 10;
+                            int c2 = specificity % 10;
+                            if (a > maxA || (a == maxA && b > maxB) || (a == maxA && b == maxB && c2 > maxC))
+                            {
+                                maxA = a;
+                                maxB = b;
+                                maxC = c2;
+                            }
+                        }
+                        idCount += maxA;
+                        classLikeCount += maxB;
+                        typeCount += maxC;
+                    }
+                }
+                else if (!pseudoElement && pseudoName.Equals("where", StringComparison.OrdinalIgnoreCase) && i < simple.Length && simple[i] == '(')
+                {
+                    TryReadFunctionArgument(simple, ref i, out _);
+                }
+                else if (!pseudoElement)
+                {
+                    classLikeCount++;
+                    if (i < simple.Length && simple[i] == '(')
+                        TryReadFunctionArgument(simple, ref i, out _);
+                }
+            }
+            else
+            {
+                int start = i;
+                while (i < simple.Length && simple[i] != '.' && simple[i] != '#' && simple[i] != '[' && simple[i] != ':') i++;
+                var type = simple.Substring(start, i - start).Trim();
+                if (!string.IsNullOrEmpty(type) && type != "*")
+                    hasType = true;
+            }
+        }
+
+        if (hasType) typeCount++;
+        return (idCount, classLikeCount, typeCount);
     }
 
     private readonly struct StylePriority : IComparable<StylePriority>
@@ -308,6 +413,39 @@ public sealed class StyleResolver
         return null;
     }
 
+    private static HtmlNode? GetNextElementSibling(HtmlNode node)
+    {
+        var parent = node.Parent;
+        if (parent == null) return null;
+        var siblings = parent.Children;
+        var pos = siblings.IndexOf(node);
+        if (pos < 0 || pos >= siblings.Count - 1) return null;
+        for (int i = pos + 1; i < siblings.Count; i++)
+        {
+            var sib = siblings[i];
+            if (sib.TagName == "#text") continue;
+            return sib;
+        }
+        return null;
+    }
+
+    private static List<HtmlNode> GetFollowingElementSiblings(HtmlNode node)
+    {
+        var result = new List<HtmlNode>();
+        var parent = node.Parent;
+        if (parent == null) return result;
+        var siblings = parent.Children;
+        var pos = siblings.IndexOf(node);
+        if (pos < 0 || pos >= siblings.Count - 1) return result;
+        for (int i = pos + 1; i < siblings.Count; i++)
+        {
+            var sib = siblings[i];
+            if (sib.TagName == "#text") continue;
+            result.Add(sib);
+        }
+        return result;
+    }
+
     private static List<string> TokenizeSelector(string selector)
     {
         var tokens = new List<string>();
@@ -335,6 +473,7 @@ public sealed class StyleResolver
 
             int start = i;
             int bracketDepth = 0;
+            int parenDepth = 0;
             char quote = '\0';
             while (i < selector.Length)
             {
@@ -355,8 +494,10 @@ public sealed class StyleResolver
 
                 if (c == '[') { bracketDepth++; i++; continue; }
                 if (c == ']') { if (bracketDepth > 0) bracketDepth--; i++; continue; }
+                if (c == '(') { parenDepth++; i++; continue; }
+                if (c == ')') { if (parenDepth > 0) parenDepth--; i++; continue; }
 
-                if (bracketDepth == 0 && (char.IsWhiteSpace(c) || c == '>' || c == '+' || c == '~'))
+                if (bracketDepth == 0 && parenDepth == 0 && (char.IsWhiteSpace(c) || c == '>' || c == '+' || c == '~'))
                     break;
 
                 i++;
@@ -385,7 +526,8 @@ public sealed class StyleResolver
         string tag = string.Empty;
         string? id = null;
         var classes = new List<string>();
-        var attributes = new List<(string name, string? value)>();
+        var attributes = new List<AttributeSelector>();
+        var negations = new List<string>();
 
         int i = 0;
         while (i < sel.Length)
@@ -395,14 +537,14 @@ public sealed class StyleResolver
             {
                 i++;
                 int start = i;
-                while (i < sel.Length && sel[i] != '.' && sel[i] != '#' && sel[i] != '[') i++;
+                while (i < sel.Length && sel[i] != '.' && sel[i] != '#' && sel[i] != '[' && sel[i] != ':') i++;
                 id = sel[start..i];
             }
             else if (c == '.')
             {
                 i++;
                 int start = i;
-                while (i < sel.Length && sel[i] != '.' && sel[i] != '#' && sel[i] != '[') i++;
+                while (i < sel.Length && sel[i] != '.' && sel[i] != '#' && sel[i] != '[' && sel[i] != ':') i++;
                 classes.Add(sel[start..i]);
             }
             else if (c == '[')
@@ -412,21 +554,117 @@ public sealed class StyleResolver
                 while (i < sel.Length && sel[i] != ']') i++;
                 var inside = sel[start..i];
                 i++; // skip ']'
-                string name = inside;
-                string? val = null;
-                var eq = inside.IndexOf('=');
-                if (eq >= 0)
+                ParseAttributeSelector(inside, attributes);
+            }
+            else if (c == ':')
+            {
+                i++;
+                bool pseudoElement = i < sel.Length && sel[i] == ':';
+                if (pseudoElement) return false;
+
+                int nameStart = i;
+                while (i < sel.Length && (char.IsLetterOrDigit(sel[i]) || sel[i] == '-' || sel[i] == '_')) i++;
+                var pseudoName = sel.Substring(nameStart, i - nameStart);
+                if (pseudoName.Equals("not", StringComparison.OrdinalIgnoreCase) && i < sel.Length && sel[i] == '(')
                 {
-                    name = inside.Substring(0, eq);
-                    val = inside.Substring(eq + 1).Trim('"', '\'');
+                    if (!TryReadFunctionArgument(sel, ref i, out var arg)) return false;
+                    foreach (var part in SplitSelectorList(arg))
+                    {
+                        var simplePart = part.Trim();
+                        if (string.IsNullOrEmpty(simplePart)) return false;
+                        negations.Add(simplePart);
+                    }
                 }
-                attributes.Add((name, val));
+                else if ((pseudoName.Equals("is", StringComparison.OrdinalIgnoreCase) || pseudoName.Equals("where", StringComparison.OrdinalIgnoreCase)) && i < sel.Length && sel[i] == '(')
+                {
+                    if (!TryReadFunctionArgument(sel, ref i, out var arg)) return false;
+                    bool any = false;
+                    foreach (var part in SplitSelectorList(arg))
+                    {
+                        var simplePart = part.Trim();
+                        if (string.IsNullOrEmpty(simplePart)) continue;
+                        if (MatchesRelativeSelector(node, simplePart))
+                        {
+                            any = true;
+                            break;
+                        }
+                    }
+                    if (!any) return false;
+                }
+                else if (pseudoName.Equals("has", StringComparison.OrdinalIgnoreCase) && i < sel.Length && sel[i] == '(')
+                {
+                    if (!TryReadFunctionArgument(sel, ref i, out var arg)) return false;
+                    bool any = false;
+                    foreach (var part in SplitSelectorList(arg))
+                    {
+                        var relative = part.Trim();
+                        if (string.IsNullOrEmpty(relative)) continue;
+                        if (MatchesHasRelativeSelector(node, relative))
+                        {
+                            any = true;
+                            break;
+                        }
+                    }
+                    if (!any) return false;
+                }
+                else if (pseudoName.Equals("first-child", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!IsFirstChild(node)) return false;
+                }
+                else if (pseudoName.Equals("last-child", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!IsLastChild(node)) return false;
+                }
+                else if (pseudoName.Equals("only-child", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!IsOnlyChild(node)) return false;
+                }
+                else if (pseudoName.Equals("first-of-type", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!IsFirstOfType(node)) return false;
+                }
+                else if (pseudoName.Equals("last-of-type", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!IsLastOfType(node)) return false;
+                }
+                else if (pseudoName.Equals("only-of-type", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!IsOnlyOfType(node)) return false;
+                }
+                else if (pseudoName.Equals("nth-child", StringComparison.OrdinalIgnoreCase) && i < sel.Length && sel[i] == '(')
+                {
+                    if (!TryReadFunctionArgument(sel, ref i, out var arg)) return false;
+                    if (!MatchesNthChild(node, arg)) return false;
+                }
+                else if (pseudoName.Equals("nth-of-type", StringComparison.OrdinalIgnoreCase) && i < sel.Length && sel[i] == '(')
+                {
+                    if (!TryReadFunctionArgument(sel, ref i, out var arg)) return false;
+                    if (!MatchesNthOfType(node, arg)) return false;
+                }
+                else if (pseudoName.Equals("nth-last-child", StringComparison.OrdinalIgnoreCase) && i < sel.Length && sel[i] == '(')
+                {
+                    if (!TryReadFunctionArgument(sel, ref i, out var arg)) return false;
+                    if (!MatchesNthLastChild(node, arg)) return false;
+                }
+                else if (pseudoName.Equals("nth-last-of-type", StringComparison.OrdinalIgnoreCase) && i < sel.Length && sel[i] == '(')
+                {
+                    if (!TryReadFunctionArgument(sel, ref i, out var arg)) return false;
+                    if (!MatchesNthLastOfType(node, arg)) return false;
+                }
+                else if (pseudoName.Equals("empty", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!IsEmpty(node)) return false;
+                }
+                else
+                {
+                    return false;
+                }
             }
             else
             {
                 // tag name
                 int start = i;
-                while (i < sel.Length && sel[i] != '.' && sel[i] != '#' && sel[i] != '[') i++;
+                while (i < sel.Length && sel[i] != '.' && sel[i] != '#' && sel[i] != '[' && sel[i] != ':') i++;
                 tag = sel[start..i];
             }
         }
@@ -444,15 +682,339 @@ public sealed class StyleResolver
         }
         if (attributes.Count > 0)
         {
-            foreach (var (name, val) in attributes)
+            foreach (var attrSel in attributes)
             {
-                var attr = node.GetAttribute(name);
-                if (attr == null) return false;
-                if (val != null && !attr.Equals(val, StringComparison.OrdinalIgnoreCase))
+                var attr = node.GetAttribute(attrSel.Name);
+                if (!MatchesAttribute(attr, attrSel))
                     return false;
+            }
+        }
+        if (negations.Count > 0)
+        {
+            foreach (var neg in negations)
+            {
+                if (MatchesSimple(node, neg)) return false;
             }
         }
 
         return true;
+    }
+
+    private static bool MatchesRelativeSelector(HtmlNode node, string selector)
+    {
+        var tokens = TokenizeSelector(selector);
+        if (tokens.Count == 0) return false;
+        if (Combinators.Contains(tokens[^1])) return false;
+        return MatchTokensFromRight(node, tokens, tokens.Count - 1);
+    }
+
+    private static bool MatchesHasRelativeSelector(HtmlNode scope, string selector)
+    {
+        var trimmed = selector.Trim();
+        if (string.IsNullOrEmpty(trimmed)) return false;
+
+        char lead = trimmed[0];
+        if (lead == '>' || lead == '+' || lead == '~')
+        {
+            var rest = trimmed.Substring(1).Trim();
+            if (string.IsNullOrEmpty(rest)) return false;
+            bool searchDescendants = SelectorNeedsDescendantSearch(rest);
+            var anchors = lead switch
+            {
+                '>' => scope.Children.Where(x => x.TagName != "#text").ToList(),
+                '+' => GetNextElementSibling(scope) is HtmlNode n ? new List<HtmlNode> { n } : new List<HtmlNode>(),
+                '~' => GetFollowingElementSiblings(scope),
+                _ => new List<HtmlNode>()
+            };
+            foreach (var anchor in anchors)
+            {
+                if (!searchDescendants)
+                {
+                    if (MatchesRelativeSelector(anchor, rest)) return true;
+                    continue;
+                }
+
+                foreach (var candidate in EnumerateSelfAndDescendants(anchor))
+                {
+                    if (MatchesRelativeSelector(candidate, rest)) return true;
+                }
+            }
+            return false;
+        }
+
+        foreach (var descendant in EnumerateDescendants(scope))
+        {
+            if (MatchesRelativeSelector(descendant, trimmed)) return true;
+        }
+        return false;
+    }
+
+    private static bool IsFirstChild(HtmlNode node)
+    {
+        var siblings = GetElementSiblings(node);
+        return siblings.Count > 0 && ReferenceEquals(siblings[0], node);
+    }
+
+    private static bool IsLastChild(HtmlNode node)
+    {
+        var siblings = GetElementSiblings(node);
+        return siblings.Count > 0 && ReferenceEquals(siblings[^1], node);
+    }
+
+    private static bool IsOnlyChild(HtmlNode node)
+    {
+        var siblings = GetElementSiblings(node);
+        return siblings.Count == 1 && ReferenceEquals(siblings[0], node);
+    }
+
+    private static bool IsFirstOfType(HtmlNode node)
+    {
+        var ofType = GetElementSiblings(node).Where(s => s.TagName.Equals(node.TagName, StringComparison.OrdinalIgnoreCase)).ToList();
+        return ofType.Count > 0 && ReferenceEquals(ofType[0], node);
+    }
+
+    private static bool IsLastOfType(HtmlNode node)
+    {
+        var ofType = GetElementSiblings(node).Where(s => s.TagName.Equals(node.TagName, StringComparison.OrdinalIgnoreCase)).ToList();
+        return ofType.Count > 0 && ReferenceEquals(ofType[^1], node);
+    }
+
+    private static bool IsOnlyOfType(HtmlNode node)
+    {
+        var ofType = GetElementSiblings(node).Where(s => s.TagName.Equals(node.TagName, StringComparison.OrdinalIgnoreCase)).ToList();
+        return ofType.Count == 1 && ReferenceEquals(ofType[0], node);
+    }
+
+    private static bool MatchesNthChild(HtmlNode node, string expression)
+    {
+        var siblings = GetElementSiblings(node);
+        int index = siblings.IndexOf(node) + 1;
+        if (index <= 0) return false;
+        return MatchesNthExpression(index, expression);
+    }
+
+    private static bool MatchesNthOfType(HtmlNode node, string expression)
+    {
+        var ofType = GetElementSiblings(node).Where(s => s.TagName.Equals(node.TagName, StringComparison.OrdinalIgnoreCase)).ToList();
+        int index = ofType.IndexOf(node) + 1;
+        if (index <= 0) return false;
+        return MatchesNthExpression(index, expression);
+    }
+
+    private static bool MatchesNthLastChild(HtmlNode node, string expression)
+    {
+        var siblings = GetElementSiblings(node);
+        int indexFromEnd = siblings.Count - siblings.IndexOf(node);
+        if (indexFromEnd <= 0) return false;
+        return MatchesNthExpression(indexFromEnd, expression);
+    }
+
+    private static bool MatchesNthLastOfType(HtmlNode node, string expression)
+    {
+        var ofType = GetElementSiblings(node).Where(s => s.TagName.Equals(node.TagName, StringComparison.OrdinalIgnoreCase)).ToList();
+        int indexFromEnd = ofType.Count - ofType.IndexOf(node);
+        if (indexFromEnd <= 0) return false;
+        return MatchesNthExpression(indexFromEnd, expression);
+    }
+
+    private static bool IsEmpty(HtmlNode node)
+    {
+        if (node.Children.Count == 0) return true;
+        foreach (var child in node.Children)
+        {
+            if (child.TagName == "#text")
+            {
+                if (!string.IsNullOrEmpty(child.Text))
+                    return false;
+            }
+            else
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static bool MatchesNthExpression(int index, string expression)
+    {
+        var expr = expression.Trim().ToLowerInvariant().Replace(" ", string.Empty);
+        if (expr == "odd") return index % 2 == 1;
+        if (expr == "even") return index % 2 == 0;
+        if (int.TryParse(expr, out var exact)) return index == exact;
+
+        int nPos = expr.IndexOf('n');
+        if (nPos < 0) return false;
+
+        var aPart = expr.Substring(0, nPos);
+        var bPart = expr.Substring(nPos + 1);
+
+        int a = aPart switch
+        {
+            "" or "+" => 1,
+            "-" => -1,
+            _ when int.TryParse(aPart, out var parsedA) => parsedA,
+            _ => 0
+        };
+        if (a == 0) return false;
+
+        int b = 0;
+        if (!string.IsNullOrEmpty(bPart))
+        {
+            if (!int.TryParse(bPart, out b)) return false;
+        }
+
+        int diff = index - b;
+        if (a > 0) return diff >= 0 && diff % a == 0;
+        return diff <= 0 && diff % a == 0;
+    }
+
+    private static List<HtmlNode> GetElementSiblings(HtmlNode node)
+    {
+        if (node.Parent == null) return new List<HtmlNode> { node };
+        return node.Parent.Children.Where(c => c.TagName != "#text").ToList();
+    }
+
+    private static bool SelectorNeedsDescendantSearch(string selector)
+    {
+        var tokens = TokenizeSelector(selector);
+        return tokens.Any(t => Combinators.Contains(t));
+    }
+
+    private static IEnumerable<HtmlNode> EnumerateDescendants(HtmlNode node)
+    {
+        foreach (var child in node.Children)
+        {
+            if (child.TagName != "#text") yield return child;
+            foreach (var inner in EnumerateDescendants(child)) yield return inner;
+        }
+    }
+
+    private static IEnumerable<HtmlNode> EnumerateSelfAndDescendants(HtmlNode node)
+    {
+        if (node.TagName != "#text") yield return node;
+        foreach (var d in EnumerateDescendants(node)) yield return d;
+    }
+
+    private static bool TryReadFunctionArgument(string source, ref int i, out string argument)
+    {
+        argument = string.Empty;
+        if (i >= source.Length || source[i] != '(') return false;
+
+        int start = ++i;
+        int depth = 1;
+        char quote = '\0';
+        while (i < source.Length)
+        {
+            char c = source[i];
+            if (quote != '\0')
+            {
+                if (c == quote) quote = '\0';
+                i++;
+                continue;
+            }
+            if (c == '"' || c == '\'')
+            {
+                quote = c;
+                i++;
+                continue;
+            }
+            if (c == '(') depth++;
+            else if (c == ')')
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    argument = source.Substring(start, i - start);
+                    i++;
+                    return true;
+                }
+            }
+            i++;
+        }
+        return false;
+    }
+
+    private static IEnumerable<string> SplitSelectorList(string value)
+    {
+        var parts = new List<string>();
+        int start = 0;
+        int bracketDepth = 0;
+        int parenDepth = 0;
+        char quote = '\0';
+        for (int i = 0; i < value.Length; i++)
+        {
+            char c = value[i];
+            if (quote != '\0')
+            {
+                if (c == quote) quote = '\0';
+                continue;
+            }
+            if (c == '"' || c == '\'')
+            {
+                quote = c;
+                continue;
+            }
+            if (c == '[') { bracketDepth++; continue; }
+            if (c == ']') { if (bracketDepth > 0) bracketDepth--; continue; }
+            if (c == '(') { parenDepth++; continue; }
+            if (c == ')') { if (parenDepth > 0) parenDepth--; continue; }
+            if (c == ',' && bracketDepth == 0 && parenDepth == 0)
+            {
+                parts.Add(value.Substring(start, i - start));
+                start = i + 1;
+            }
+        }
+        parts.Add(value.Substring(start));
+        return parts;
+    }
+
+    private static void ParseAttributeSelector(string inside, List<AttributeSelector> attributes)
+    {
+        string raw = inside.Trim();
+        if (string.IsNullOrEmpty(raw)) return;
+        string[] operators = { "~=", "|=", "^=", "$=", "*=", "=" };
+        foreach (var op in operators)
+        {
+            int idx = raw.IndexOf(op, StringComparison.Ordinal);
+            if (idx > 0)
+            {
+                var name = raw.Substring(0, idx).Trim();
+                var value = raw.Substring(idx + op.Length).Trim().Trim('"', '\'');
+                attributes.Add(new AttributeSelector(name, op, value));
+                return;
+            }
+        }
+        attributes.Add(new AttributeSelector(raw, null, null));
+    }
+
+    private static bool MatchesAttribute(string? attr, AttributeSelector sel)
+    {
+        if (attr == null) return false;
+        if (sel.Operator == null) return true;
+        var value = sel.Value ?? string.Empty;
+        return sel.Operator switch
+        {
+            "=" => attr.Equals(value, StringComparison.OrdinalIgnoreCase),
+            "^=" => attr.StartsWith(value, StringComparison.OrdinalIgnoreCase),
+            "$=" => attr.EndsWith(value, StringComparison.OrdinalIgnoreCase),
+            "*=" => attr.Contains(value, StringComparison.OrdinalIgnoreCase),
+            "~=" => attr.Split(' ', StringSplitOptions.RemoveEmptyEntries).Any(x => x.Equals(value, StringComparison.OrdinalIgnoreCase)),
+            "|=" => attr.Equals(value, StringComparison.OrdinalIgnoreCase) || attr.StartsWith(value + "-", StringComparison.OrdinalIgnoreCase),
+            _ => false
+        };
+    }
+
+    private readonly struct AttributeSelector
+    {
+        public string Name { get; }
+        public string? Operator { get; }
+        public string? Value { get; }
+
+        public AttributeSelector(string name, string? @operator, string? value)
+        {
+            Name = name;
+            Operator = @operator;
+            Value = value;
+        }
     }
 }
